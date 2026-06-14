@@ -11,7 +11,7 @@ def format_to_mmss(total_seconds):
     seconds = int(total_seconds) % 60
     return f"{minutes:02d}:{seconds:02d}"
 
-# --- 2. INITIALIZE ARTIFACT GLOBAL STATE WITH USER PHYSICAL METERS ---
+# --- 2. INITIALIZE GLOBAL STATE WITH DEFINED DATA ---
 if "sim_time" not in st.session_state:
     st.session_state.sim_time = 0          
     st.session_state.trip_log = []         
@@ -26,16 +26,15 @@ if "sim_time" not in st.session_state:
     st.session_state.active_delivery_qty = 0
     st.session_state.current_target_point = None
 
-    # COUPLING GEOMETRY BASED ON PHYSICAL METERS FROM START (0 meters)
-    # Total system loop boundary length is modeled at 1000 meters for full circle return scaling.
+    # Sequential order and distance mapping along a single 1000-meter straight run layout
     st.session_state.workstations = {
-        "RA140": {"lane": "top",    "sequence_order": 1, "sub_stations": {"Point A": {"inventory": 22, "rop": 10, "qty_per_pkg": 8,  "pkgs_per_trip": 4, "distance_meters": 100}}},
-        "RA130": {"lane": "top",    "sequence_order": 2, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_meters": 220}}},
-        "RA120": {"lane": "top",    "sequence_order": 3, "sub_stations": {"Point A": {"inventory": 23, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_meters": 340}}},
-        "RA110": {"lane": "top",    "sequence_order": 4, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_meters": 460}}},
-        "RA150": {"lane": "bottom", "sequence_order": 5, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_meters": 600}}},
-        "RA160": {"lane": "bottom", "sequence_order": 6, "sub_stations": {"Point A": {"inventory": 26, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_meters": 740}}},
-        "RA170": {"lane": "bottom", "sequence_order": 7, "sub_stations": {"Point A": {"inventory": 25, "rop": 15, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_meters": 880}}}
+        "RA140": {"sequence_order": 1, "sub_stations": {"Point A": {"inventory": 22, "rop": 10, "qty_per_pkg": 8,  "pkgs_per_trip": 4, "distance_meters": 120}}},
+        "RA130": {"sequence_order": 2, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_meters": 240}}},
+        "RA120": {"sequence_order": 3, "sub_stations": {"Point A": {"inventory": 23, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_meters": 360}}},
+        "RA110": {"sequence_order": 4, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_meters": 480}}},
+        "RA150": {"sequence_order": 5, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_meters": 600}}},
+        "RA160": {"sequence_order": 6, "sub_stations": {"Point A": {"inventory": 26, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_meters": 720}}},
+        "RA170": {"sequence_order": 7, "sub_stations": {"Point A": {"inventory": 25, "rop": 15, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_meters": 860}}}
     }
     
     for ws_name, ws_data in st.session_state.workstations.items():
@@ -46,7 +45,7 @@ if "sim_time" not in st.session_state:
     snap = {f"{ws}_{sub}": d["inventory"] for ws in st.session_state.workstations.values() for sub, d in ws["sub_stations"].items()}
     st.session_state.chart_data = pd.DataFrame([snap])
 
-# --- 3. SIDEBAR ENGINE CONTROL PANEL ---
+# --- 3. SIDEBAR CONFIGURATION MATRIX ---
 st.sidebar.title("🎮 Factory Control Room")
 app_mode = st.sidebar.selectbox("📂 Select Dashboard Page", ["🗺️ Live Simulation Map", "📊 Isolated Shortage Analytics"])
 
@@ -55,8 +54,7 @@ master_takt_mins = st.sidebar.number_input("Whole Line Master Takt (Minutes)", m
 master_takt_secs = int(master_takt_mins * 60)
 
 st.sidebar.header("🚜 Logistics Towing Properties")
-speed_kmh = st.sidebar.number_input("Tugger Travel Speed (km/h)", min_value=1.0, max_value=30.0, value=8.0, step=0.5)
-# Convert km/h to meters per second internally
+speed_kmh = st.sidebar.number_input("Tugger Travel Speed (km/h)", min_value=1.0, max_value=30.0, value=12.0, step=0.5)
 speed_ms = (speed_kmh * 1000.0) / 3600.0
 
 st.sidebar.header("🏢 Modify Station Parameters (Meters)")
@@ -68,7 +66,6 @@ if selected_flat and selected_flat != "None":
     pt_ref = st.session_state.workstations[ws_target]["sub_stations"][sub_target]
     
     st.markdown(f"⚙️ **Editing Logistics:** `{ws_target}`")
-    st.session_state.workstations[ws_target]["sequence_order"] = st.sidebar.number_input("Sequence Order Rank:", min_value=1, value=int(st.session_state.workstations[ws_target]["sequence_order"]))
     pt_ref["distance_meters"] = st.sidebar.number_input("Range From Start Point (Meters):", min_value=10, max_value=990, value=int(pt_ref["distance_meters"]))
     pt_ref["inventory"] = st.sidebar.number_input("Live Stock Level (Units)", min_value=0, value=int(pt_ref["inventory"]))
     pt_ref["rop"] = st.sidebar.number_input("Reorder Threshold (ROP)", min_value=0, value=int(pt_ref["rop"]))
@@ -79,14 +76,14 @@ st.sidebar.markdown("---")
 st.sidebar.header("⚡ Simulation Processing Engine")
 speed_acceleration = st.sidebar.slider("Simulation Processing Speed Steps (s)", min_value=1, max_value=60, value=15)
 
-# --- 4. ENGINE ADVANCEMENT METRIC PROCESS ---
+# --- 4. ENGINE ADVANCEMENT CALCULATIONS ---
 def advance_simulation(seconds):
-    total_loop_meters = 1000.0  # Definition of total track loop length for return calibration
+    total_loop_meters = 1000.0
     
     for _ in range(int(seconds)):
         st.session_state.sim_time += 1
         
-        # A. Takt Sequence consumption clock engine
+        # A. Inventory consumption by takt time
         for ws_name, ws_data in st.session_state.workstations.items():
             stagger_offset = (ws_data["sequence_order"] - 1) * master_takt_secs
             target_trigger_time = st.session_state.sim_time - stagger_offset
@@ -99,7 +96,7 @@ def advance_simulation(seconds):
                     else:
                         st.session_state.starvation_events[unique_key] += 1
 
-        # B. Single-Car Dynamic Meters Physics Routing Engine
+        # B. Linear One-Way Dispatch Loop Engine
         if st.session_state.tugger_status == "Idle at Start Hub":
             st.session_state.tugger_pct = 0.0
             highest_urgency = -9999
@@ -121,7 +118,7 @@ def advance_simulation(seconds):
                 
                 st.session_state.tugger_status = f"Loading Car at Start Hub for {chosen_ws}"
                 st.session_state.trip_start_time = st.session_state.sim_time
-                st.session_state.process_timer = 20  # Load staging delay
+                st.session_state.process_timer = 20  
                 st.session_state.max_transit_secs = 20
                 
         elif st.session_state.tugger_status.startswith("Loading Car"):
@@ -130,9 +127,7 @@ def advance_simulation(seconds):
                 w, s = st.session_state.current_target_point
                 target_distance = st.session_state.workstations[w]["sub_stations"][s]["distance_meters"]
                 
-                # MATHEMATICAL REALITY CALCULATION: Time = Distance / Speed (seconds)
                 calc_transit_seconds = int(target_distance / speed_ms)
-                
                 st.session_state.tugger_status = f"One-Way Run to {w}"
                 st.session_state.process_timer = max(1, calc_transit_seconds)  
                 st.session_state.max_transit_secs = max(1, calc_transit_seconds)
@@ -142,11 +137,9 @@ def advance_simulation(seconds):
             w, s = st.session_state.current_target_point
             target_distance = st.session_state.workstations[w]["sub_stations"][s]["distance_meters"]
             
-            # Map visual position as a percentage directly to distance scaled timer tracking
             elapsed = st.session_state.max_transit_secs - st.session_state.process_timer
             ratio = elapsed / st.session_state.max_transit_secs
             
-            # Compute track percentage based on meter position out of 1000m total path
             current_meters = ratio * target_distance
             st.session_state.tugger_pct = (current_meters / total_loop_meters) * 100.0
             
@@ -166,7 +159,6 @@ def advance_simulation(seconds):
                 st.session_state.trip_counter += 1
                 target_distance = st.session_state.workstations[w]["sub_stations"][s]["distance_meters"]
                 
-                # Return time calculation based on remaining distance to complete the 1000m loop path
                 remaining_return_distance = total_loop_meters - target_distance
                 calc_return_seconds = int(remaining_return_distance / speed_ms)
                 
@@ -182,7 +174,6 @@ def advance_simulation(seconds):
             elapsed = st.session_state.max_transit_secs - st.session_state.process_timer
             ratio = elapsed / st.session_state.max_transit_secs
             
-            # Calculate forward movement continuation over remainder of loop to reach 1000 meters
             current_meters = target_distance + (ratio * (total_loop_meters - target_distance))
             st.session_state.tugger_pct = (current_meters / total_loop_meters) * 100.0
             
@@ -224,8 +215,7 @@ with c3:
 
 # --- 6. VISUAL APP RENDER EXECUTION INTERFACE ---
 if app_mode == "🗺️ Live Simulation Map":
-    st.title("🗺️ Distance-Driven U-Shaped Supply Simulation Map")
-    st.markdown(f"📊 **Logistics Speed Setting:** Towing speed is locked at **{speed_kmh} km/h** ({round(speed_ms, 2)} m/s). Travel durations are calculated directly from your specified node meter values.")
+    st.title("🗺️ Straight Line Material Flow Tracker")
     
     map_container_box = st.empty()
     status_msg_box = st.empty()
@@ -236,42 +226,31 @@ if app_mode == "🗺️ Live Simulation Map":
         tgt_tuple = st.session_state.current_target_point
         tgt_ws = tgt_tuple[0] if tgt_tuple else None
         
-        top_markers = ""
-        bottom_markers = ""
+        point_markers = ""
         info_cards = ""
         
         for ws_name, ws_data in st.session_state.workstations.items():
             for sub_name, d in ws_data["sub_stations"].items():
                 m_range = d["distance_meters"]
                 is_active_target = (ws_name == tgt_ws)
-                is_targeted = "background: #fa5252; color: white; border: 3px solid #fff; box-shadow: 0 0 20px #fa5252; transform: translateX(-50%) scale(1.1);" if is_active_target else "background: #343a40; color: #f8f9fa; border: 1px solid #495057;"
+                is_targeted = "background: #fa5252; color: white; border: 2px solid #fff; box-shadow: 0 0 12px #fa5252; transform: translateX(-50%) scale(1.05);" if is_active_target else "background: #343a40; color: #f8f9fa; border: 1px solid #495057;"
                 unique_key = f"{ws_name}_{sub_name}"
                 
-                # DYNAMIC PHYSICAL PLACEMENT SCALING ON THE TWO-LANE U-LOOP MAP:
-                if ws_data["lane"] == "top":
-                    # Top Lane scales from 0m to 500m horizontally across screen from 5% to 85%
-                    horizontal_pct = (m_range / 500.0) * 80.0 + 5.0
-                else:
-                    # Bottom Lane scales from 500m to 1000m running right-to-left
-                    horizontal_pct = 85.0 - ((m_range - 500.0) / 500.0) * 80.0
+                # Dynamic horizontal mapping on a single clean linear vector track line (from 8% to 92%)
+                horizontal_pct = 8.0 + (m_range / 1000.0) * 84.0
 
-                pin_html = f"""
+                point_markers += f"""
                 <div class="station-node-pin" style="left: {horizontal_pct}%; {is_targeted}">
-                    <div style="font-size: 13px; font-weight: bold;">📍 {ws_name}</div>
-                    <div style="font-size: 11px; background:rgba(255,255,255,0.15); border-radius:3px; padding:0 3px; display:inline-block; margin-top:2px;">{int(m_range)}m</div>
+                    <div style="font-weight: bold; font-size: 12px;">{ws_name}</div>
+                    <div style="font-size: 10px; opacity: 0.85;">{int(m_range)}m</div>
                 </div>
                 """
                 
-                if ws_data["lane"] == "top":
-                    top_markers += pin_html
-                else:
-                    bottom_markers += pin_html
-                
-                card_style = "border-top: 5px solid #fa5252; background-color: #fff5f5;" if is_active_target else "border-top: 5px solid #1c7ed6;"
+                card_style = "border-top: 4px solid #fa5252; background-color: #fff5f5;" if is_active_target else "border-top: 4px solid #1c7ed6;"
                 info_cards += f"""
                 <div class="kpi-card-block" style="{card_style}">
                     <div class="card-title">🏭 {ws_name} <span style="font-size:10px; font-weight:normal; color:#6c757d;">({int(m_range)}m)</span></div>
-                    <div class="card-stock">📦 {d['inventory']} <span style="font-size:12px; font-weight:normal; color:#495057;">u</span></div>
+                    <div class="card-stock">📦 {d['inventory']} <span style="font-size:11px; font-weight:normal; color:#495057;">u</span></div>
                     <div class="card-meta">
                         ROP: <b>{d['rop']} u</b> <br>
                         Shortage: <span style="color:#fa5252; font-weight:bold;">{format_to_mmss(st.session_state.starvation_events[unique_key])}</span>
@@ -279,61 +258,39 @@ if app_mode == "🗺️ Live Simulation Map":
                 </div>
                 """
                 
-        top_car_tag = ""
-        bottom_car_tag = ""
-        
+        # Scaled coordinate placement for the active single car vehicle tag along the same vector
+        car_tag = ""
         if pct > 0:
-            if pct <= 50:
-                # Top lane visual conversion
-                scaled_pos = (pct / 50.0) * 80.0 + 5.0
-                top_car_tag = f'<div class="tugger-truck" style="left: {scaled_pos}%;">🚜 Car 1 (Transit)</div>'
-            else:
-                # Bottom lane visual conversion
-                scaled_pos = 85.0 - ((pct - 50.0) / 50.0) * 80.0
-                bottom_car_tag = f'<div class="tugger-truck returning" style="left: {scaled_pos}%;">🚜 Car 1 (Return Loop)</div>'
+            horizontal_car_pos = 8.0 + (pct / 100.0) * 84.0
+            label = "🚜 Transit" if pct <= (st.session_state.workstations[tgt_ws]["sub_stations"]["Point A"]["distance_meters"]/10.0) else "🚜 Returning"
+            color_mod = "returning" if "Returning" in label else ""
+            car_tag = f'<div class="tugger-truck {color_mod}" style="left: {horizontal_car_pos}%;">{label}</div>'
 
         return f"""
         <style>
-            .floorplan-wrapper {{ background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 16px; padding: 32px; font-family: system-ui, sans-serif; }}
-            .cards-outer-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-top: 30px; }}
-            .kpi-card-block {{ background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.03); text-align: center; }}
-            .card-title {{ font-weight: bold; font-size: 14px; color: #212529; }}
-            .card-stock {{ font-size: 22px; font-weight: 800; color: #1c7ed6; margin: 4px 0; }}
-            .card-meta {{ font-size: 11px; color: #6c757d; line-height: 1.4; border-top: 1px solid #f1f3f5; padding-top: 4px; margin-top: 6px; }}
+            .floorplan-wrapper {{ background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 12px; padding: 24px; font-family: system-ui, sans-serif; }}
+            .cards-outer-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 10px; margin-top: 25px; }}
+            .kpi-card-block {{ background: #ffffff; border: 1px solid #dee2e6; border-radius: 6px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }}
+            .card-title {{ font-weight: bold; font-size: 13px; color: #212529; }}
+            .card-stock {{ font-size: 20px; font-weight: 800; color: #1c7ed6; margin: 2px 0; }}
+            .card-meta {{ font-size: 11px; color: #6c757d; border-top: 1px solid #f1f3f5; padding-top: 4px; margin-top: 4px; line-height: 1.3; }}
             
-            .runway-lane-track {{ height: 55px; background: linear-gradient(180deg, #e9ecef 0%, #ced4da 100%); border-top: 4px dashed #868e96; border-bottom: 4px dashed #868e96; position: relative; margin: 60px 0; border-radius: 6px; }}
-            .lane-label {{ position: absolute; left: 140px; top: 16px; font-size: 13px; font-weight: 800; color: #adb5bd; letter-spacing: 1.5px; }}
+            /* Simple Linear Track Line Design */
+            .linear-track-line {{ height: 12px; background: #ced4da; border-radius: 6px; position: relative; margin: 65px 0 35px 0; border: 1px solid #adb5bd; }}
             
-            .docking-terminal {{ position: absolute; left: 0%; top: -38px; background: #2b8a3e; color: white; padding: 8px 18px; border-radius: 4px; font-size: 12px; font-weight: bold; z-index: 15; transform: translateX(-50%); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
-            .turnaround-curve {{ position: absolute; right: 13%; top: 27px; width: 50px; height: 175px; border: 5px dashed #868e96; border-left: none; border-radius: 0 50px 50px 0; z-index: 1; }}
+            .endpoint-terminal {{ position: absolute; top: -32px; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; transform: translateX(-50%); z-index: 15; }}
+            .station-node-pin {{ position: absolute; top: -45px; padding: 5px 10px; border-radius: 6px; z-index: 12; text-align: center; transform: translateX(-50%); min-width: 65px; box-shadow: 0 3px 6px rgba(0,0,0,0.05); transition: all 0.1s linear; }}
             
-            .station-node-pin {{ position: absolute; top: -38px; padding: 8px 14px; border-radius: 8px; z-index: 12; text-align: center; line-height: 1.3; box-shadow: 0 6px 12px rgba(0,0,0,0.08); transition: all 0.2s; min-width: 95px; transform: translateX(-50%); }}
-            
-            .tugger-truck {{ position: absolute; top: -56px; background: #1c7ed6; color: white; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: bold; transform: translateX(-50%); z-index: 20; white-space: nowrap; box-shadow: 0 8px 20px rgba(28,126,214,0.3); border: 2px solid #fff; }}
-            .tugger-truck.returning {{ background: #e03131; box-shadow: 0 8px 20px rgba(224,49,49,0.3); }}
-            .flow-arrow {{ position: absolute; right: 180px; top: 16px; font-size: 16px; color: #adb5bd; font-weight: bold; }}
+            .tugger-truck {{ position: absolute; top: 18px; background: #1c7ed6; color: white; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; transform: translateX(-50%); z-index: 20; white-space: nowrap; border: 1px solid #fff; box-shadow: 0 4px 8px rgba(28,126,214,0.25); }}
+            .tugger-truck.returning {{ background: #e03131; box-shadow: 0 4px 8px rgba(224,49,49,0.25); }}
         </style>
         <div class="floorplan-wrapper">
-            <div style="position: relative; margin: 20px 10px;">
-                
-                <div class="turnaround-curve"></div>
-
-                <div class="runway-lane-track" style="width: 85%;">
-                    <div class="docking-terminal" style="background:#2b8a3e;">🏁 START HUB (0m)</div>
-                    <div class="lane-label">🡦 ONE-WAY RUN SUPPLY LANE (LEFT ➔ RIGHT)</div>
-                    <div class="flow-arrow">➔ ➔</div>
-                    {top_markers}
-                    {top_car_tag}
-                </div>
-
-                <div class="runway-lane-track" style="margin-top: 110px; width: 85%;">
-                    <div class="docking-terminal" style="background:#495057;">🛬 RETURN POINT (1000m)</div>
-                    <div class="lane-label" style="color:#c1c2c3;">🡧 ONE-WAY RETURN LANE (RIGHT ➔ LEFT)</div>
-                    <div class="flow-arrow" style="left: 140px; right: auto;">➔ ➔</div>
-                    {bottom_markers}
-                    {bottom_car_tag}
-                </div>
-                
+            
+            <div class="linear-track-line">
+                <div class="endpoint-terminal" style="left: 8%; background: #2b8a3e;">🛫 START (0m)</div>
+                {point_markers}
+                {car_tag}
+                <div class="endpoint-terminal" style="left: 92%; background: #495057;">🛬 RETURN (1000m)</div>
             </div>
 
             <div class="cards-outer-container">{info_cards}</div>
@@ -345,14 +302,13 @@ if app_mode == "🗺️ Live Simulation Map":
             advance_simulation(speed_acceleration)
             map_container_box.html(generate_html_floorplan())
             
-            # Show live countdown calculation metrics on screen
-            status_msg_box.info(f"🚜 **Vehicle Physics Monitor:** `{st.session_state.tugger_status}` (Timer Remaining: `{st.session_state.process_timer}s` | Core Position: `{round(st.session_state.tugger_pct * 10, 1)} meters`)")
+            status_msg_box.info(f"🚜 **Vehicle Tracker:** `{st.session_state.tugger_status}` (Countdown: `{st.session_state.process_timer}s` | Position: `{int(st.session_state.tugger_pct * 10)} meters`)")
             
             with kpi_metric_row.container():
                 m1, m2, m3 = st.columns(3)
                 m1.metric("⏱️ Operational Time Elapsed (MM:SS)", format_to_mmss(st.session_state.sim_time))
-                m2.metric("🚜 Completed Full Circuit Supply Loops", f"{st.session_state.trip_counter} Loops")
-                m3.metric("📦 Car Cargo Refill Volume", f"{st.session_state.active_delivery_qty} units")
+                m2.metric("🚜 Completed Full Loops", f"{st.session_state.trip_counter} Runs")
+                m3.metric("📦 Active Consignment Cargo Volume", f"{st.session_state.active_delivery_qty} units")
             
             time.sleep(0.04)
     else:
