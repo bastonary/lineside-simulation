@@ -18,9 +18,23 @@ def parse_mmss_to_seconds(mmss_str):
     except:
         return 0
 
-# --- 2. INITIALIZE GLOBAL STATE ---
+# --- 2. DEFINE SYSTEM DEFAULT FACTORY STRUCTURE ---
+def get_default_workstations():
+    return {
+        "RC100_LH": {"lane": "top",    "sequence_order": 1, "sub_stations": {"LH": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 60}}},
+        "RC100_RH": {"lane": "top",    "sequence_order": 1, "sub_stations": {"RH": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 65}}},
+        "RA110":    {"lane": "top",    "sequence_order": 2, "sub_stations": {"RA Subframe": {"inventory": 6,  "rop": 3,  "qty_per_pkg": 3,  "pkgs_per_trip": 1, "distance_meters": 40}}}, 
+        "RA120":    {"lane": "top",    "sequence_order": 3, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 35}}},
+        "RA130":    {"lane": "top",    "sequence_order": 4, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 30}}},
+        "RA140":    {"lane": "top",    "sequence_order": 5, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 20}}},
+        "RA170":    {"lane": "bottom", "sequence_order": 6, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 70}}},
+        "RA160":    {"lane": "bottom", "sequence_order": 7, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 90}}},
+        "RA150":    {"lane": "bottom", "sequence_order": 8, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 115}}}
+    }
+
 SHIFT_MAX_SECONDS = 480 * 60  # 480 Minutes
 
+# Initialize session states
 if "sim_time" not in st.session_state:
     st.session_state.sim_time = 0          
     st.session_state.trip_log = []         
@@ -33,26 +47,15 @@ if "sim_time" not in st.session_state:
     st.session_state.tugger_pct = 0.0      
     st.session_state.trip_start_time = 0   
     
-    # Multi-Drop Variables
     st.session_state.active_route_plan = []  
     st.session_state.current_route_index = 0  
     st.session_state.cargo_manifest = {}     
 
-    # Real footprint layout (~120 meters max track)
-    st.session_state.workstations = {
-        "RA140": {"lane": "top",    "sequence_order": 4, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 20}}},
-        "RA130": {"lane": "top",    "sequence_order": 3, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 30}}},
-        "RA120": {"lane": "top",    "sequence_order": 2, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 35}}},
-        "RA110": {"lane": "top",    "sequence_order": 1, "sub_stations": {"Point A": {"inventory": 6,  "rop": 3,  "qty_per_pkg": 3,  "pkgs_per_trip": 1, "distance_meters": 40}}}, 
-        "RA170": {"lane": "bottom", "sequence_order": 5, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 70}}},
-        "RA160": {"lane": "bottom", "sequence_order": 6, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 90}}},
-        "RA150": {"lane": "bottom", "sequence_order": 7, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 115}}}
-    }
+    st.session_state.workstations = get_default_workstations()
     
     for ws_name, ws_data in st.session_state.workstations.items():
         for sub_name in ws_data["sub_stations"].keys():
-            unique_key = f"{ws_name}_{sub_name}"
-            st.session_state.starvation_events[unique_key] = 0
+            st.session_state.starvation_events[f"{ws_name}_{sub_name}"] = 0
 
     snap = {f"{ws}_{sub}": d["inventory"] for ws in st.session_state.workstations.values() for sub, d in ws["sub_stations"].items()}
     st.session_state.chart_data = pd.DataFrame([snap])
@@ -95,7 +98,7 @@ if mod_action == "Modify Station Data":
 
 elif mod_action == "Add New Station/Drop Point":
     st.markdown("### ➕ Register New Station Node")
-    new_ws_name = st.sidebar.text_input("Workstation Name (e.g. RA180):", "RA180")
+    new_ws_name = st.sidebar.text_input("Workstation Name:", "RA180")
     new_sub_name = st.sidebar.text_input("Sub-Station Drop Point Identifier:", "Point A")
     new_lane = st.sidebar.selectbox("Track Layout Lane Position:", ["top", "bottom"])
     new_seq = st.sidebar.number_input("Production Consumed Sequence Position:", min_value=1, value=5)
@@ -179,14 +182,12 @@ def advance_simulation(seconds):
                 primary = needed_requests[0]
                 selected_stops = [primary]
                 
-                # CONDITION IMPLEMENTATION:
-                # If primary is 3 units/pkg, it travels strictly 1 by 1 (no batching)
-                # If primary is 12 units/pkg, it cannot mix with 3 units/pkg
+                # Rule 1 & Rule 2 Constraints
                 if primary["pkg_size"] != 3:  
                     for secondary in needed_requests[1:]:
                         if secondary["pkg_size"] != 3 and secondary["ws"] != primary["ws"]:
                             selected_stops.append(secondary)
-                            break # Found 2nd standard package, close the trip batch
+                            break 
                 
                 # Route Sorting (Closest Station First)
                 selected_stops.sort(key=lambda x: x["distance"])
@@ -313,6 +314,7 @@ with c2:
         st.session_state.running = False
 with c3:
     if st.button("🔄 Clear & Reset State", use_container_width=True):
+        # HARD RESET: Forces everything back to core setup defaults
         st.session_state.sim_time = 0
         st.session_state.trip_log = []
         st.session_state.tugger_status = "Idle at Start Hub"
@@ -320,8 +322,13 @@ with c3:
         st.session_state.cargo_manifest = {}
         st.session_state.running = False
         st.session_state.tugger_pct = 0.0
-        for p in list(st.session_state.starvation_events.keys()):
-            st.session_state.starvation_events[p] = 0
+        st.session_state.workstations = get_default_workstations()
+        st.session_state.starvation_events = {}
+        for ws_name, ws_data in st.session_state.workstations.items():
+            for sub_name in ws_data["sub_stations"].keys():
+                st.session_state.starvation_events[f"{ws_name}_{sub_name}"] = 0
+        snap = {f"{ws}_{sub}": d["inventory"] for ws in st.session_state.workstations.values() for sub, d in ws["sub_stations"].items()}
+        st.session_state.chart_data = pd.DataFrame([snap])
         st.rerun()
 
 # --- 6. USER INTERFACE PAGES ---
@@ -334,9 +341,10 @@ if app_mode == "🗺️ Live Simulation Map":
     if is_shift_done:
         st.success("🏁 **Shift Execution Finished:** Target window limit of 480 Minutes achieved. Engine locked.")
         
-    map_container_box = st.empty()
+    # --- RESTORED & MOVED: MONITOR MOVED ABOVE TUGGER TRACK FLOORPLAN ---
     status_msg_box = st.empty()
     kpi_metric_row = st.empty()
+    map_container_box = st.empty()
 
     def generate_html_floorplan():
         pct = st.session_state.tugger_pct
@@ -353,8 +361,11 @@ if app_mode == "🗺️ Live Simulation Map":
                 is_targeted = "background: #fa5252; color: white; border: 2px solid #fff; box-shadow: 0 0 12px #fa5252; transform: translate(-50%, -50%) scale(1.05);" if is_active_target else "background: #343a40; color: #f8f9fa; border: 1px solid #495057; transform: translate(-50%, -50%);"
                 unique_key = f"{ws_name}_{sub_name}"
                 
+                # Render logic coordinates based on map distances
+                clean_ws_display = ws_name.split("_")[0] # Cleans up internal names like RC100_LH -> RC100
+                
                 if ws_data["lane"] == "top":
-                    x_pos = 20.0 + ((m_range - 10.0) / 50.0) * 65.0
+                    x_pos = 20.0 + ((m_range - 10.0) / 60.0) * 65.0
                     y_pos = 20.0
                 else:
                     x_pos = 85.0 - ((m_range - 60.0) / 60.0) * 65.0
@@ -362,23 +373,22 @@ if app_mode == "🗺️ Live Simulation Map":
 
                 station_markers += f"""
                 <div class="station-node-pin" style="left: {x_pos}%; top: {y_pos}%; {is_targeted}">
-                    <div style="font-weight: bold; font-size: 11px;">{ws_name}</div>
-                    <div style="font-size: 9px; opacity: 0.8;">{int(m_range)}m</div>
+                    <div style="font-weight: bold; font-size: 10px;">{clean_ws_display}</div>
+                    <div style="font-size: 9px; opacity: 0.8;">{sub_name}</div>
                 </div>
                 """
                 
                 card_style = "border-top: 4px solid #fa5252; background-color: #fff5f5;" if is_active_target else "border-top: 4px solid #1c7ed6;"
                 shortage_val = st.session_state.starvation_events.get(unique_key, 0)
                 
-                # FIXED: ADDED DROP POINT IDENTIFIER DIRECTLY BELOW WORKSTATION NAME
                 info_cards += f"""
                 <div class="kpi-card-block" style="{card_style}">
-                    <div class="card-title">🏭 {ws_name}</div>
+                    <div class="card-title">🏭 {clean_ws_display}</div>
                     <div style="font-size: 11px; font-weight: 600; color: #495057; margin-bottom: 4px;">📍 {sub_name} <span style="font-size:10px; color:#868e96;">({int(m_range)}m)</span></div>
                     <div class="card-stock">📦 {d['inventory']} <span style="font-size:11px; color:#495057;">u</span></div>
                     <div class="card-meta">
                         Pack size: <b>{d['qty_per_pkg']}u</b><br>
-                        ROP: <b>{d['rop']} u</b><br>
+                        Seq position: <b>#{ws_data['sequence_order']}</b><br>
                         Shortage: <span style="color:#fa5252; font-weight:bold;">{format_to_mmss(shortage_val)}</span>
                     </div>
                 </div>
@@ -401,14 +411,14 @@ if app_mode == "🗺️ Live Simulation Map":
         return f"""
         <style>
             .floorplan-wrapper {{ background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 12px; padding: 20px; font-family: system-ui, sans-serif; }}
-            .cards-outer-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; margin-top: 20px; }}
+            .cards-outer-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 10px; margin-top: 20px; }}
             .kpi-card-block {{ background: #ffffff; border: 1px solid #dee2e6; border-radius: 6px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.01); }}
             .card-title {{ font-weight: bold; font-size: 14px; color: #212529; margin-bottom: 2px; }}
             .card-stock {{ font-size: 18px; font-weight: 800; color: #1c7ed6; margin: 2px 0; }}
             .card-meta {{ font-size: 10.5px; color: #6c757d; border-top: 1px solid #f1f3f5; padding-top: 4px; margin-top: 4px; line-height: 1.4; }}
             .loop-track-container {{ height: 140px; border: 4px solid #e03131; border-radius: 70px; position: relative; margin: 20px 10px; background: #ffffff; }}
             .hub-terminal {{ position: absolute; left: 5%; top: 50%; transform: translate(-50%, -50%); background: #1c7ed6; color: white; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; z-index: 16; text-align: center; line-height: 1.2; box-shadow: 0 3px 6px rgba(0,0,0,0.1); }}
-            .station-node-pin {{ position: absolute; padding: 4px 8px; border-radius: 4px; z-index: 12; text-align: center; min-width: 60px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); transition: all 0.1s linear; }}
+            .station-node-pin {{ position: absolute; padding: 4px 6px; border-radius: 4px; z-index: 12; text-align: center; min-width: 65px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); transition: all 0.1s linear; }}
             .tugger-truck {{ position: absolute; background: #2b8a3e; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; z-index: 20; white-space: nowrap; border: 1px solid #fff; box-shadow: 0 3px 8px rgba(43,138,62,0.3); }}
             .tugger-truck.returning {{ background: #e03131; box-shadow: 0 3px 8px rgba(224,49,49,0.3); }}
         </style>
@@ -425,27 +435,33 @@ if app_mode == "🗺️ Live Simulation Map":
     if st.session_state.running:
         while st.session_state.running:
             advance_simulation(speed_acceleration)
-            map_container_box.html(generate_html_floorplan())
             
             status_msg_box.info(f"🚜 **Tugger Fleet Dispatch Status:** `{st.session_state.tugger_status}` (Remaining Link Delay Timer: `{st.session_state.process_timer}s`)")
-            
             with kpi_metric_row.container():
                 m1, m2, m3 = st.columns(3)
                 m1.metric("⏱️ Simulation Runtime Elapsed", format_to_mmss(st.session_state.sim_time))
                 m2.metric("🚜 Completed Round Loops", f"{st.session_state.trip_counter} Runs")
-                
                 total_manifest_units = sum(st.session_state.cargo_manifest.values())
                 m3.metric("📦 Active Multi-Drop Trailer Payload", f"{total_manifest_units} units")
-            
+                
+            map_container_box.html(generate_html_floorplan())
             time.sleep(0.04)
             if st.session_state.sim_time >= SHIFT_MAX_SECONDS:
                 st.rerun()
     else:
-        map_container_box.html(generate_html_floorplan())
         if is_shift_done:
             status_msg_box.success("🏁 Shift cycle fully executed (480 Mins Complete).")
         else:
             status_msg_box.info(f"⏸️ **Simulation Paused:** `{st.session_state.tugger_status}`")
+            
+        with kpi_metric_row.container():
+            m1, m2, m3 = st.columns(3)
+            m1.metric("⏱️ Simulation Runtime Elapsed", format_to_mmss(st.session_state.sim_time))
+            m2.metric("🚜 Completed Round Loops", f"{st.session_state.trip_counter} Runs")
+            total_manifest_units = sum(st.session_state.cargo_manifest.values())
+            m3.metric("📦 Active Multi-Drop Trailer Payload", f"{total_manifest_units} units")
+            
+        map_container_box.html(generate_html_floorplan())
 
 # --- 7. ANALYSIS PAGE ---
 elif app_mode == "📊 Lineside Stock & Refill Analysis":
@@ -496,6 +512,7 @@ elif app_mode == "📊 Lineside Stock & Refill Analysis":
             current_stock = pt_data["inventory"]
             rop_value = pt_data["rop"]
             refill_qty = pt_data["qty_per_pkg"]
+            clean_ws_display = ws_part.split("_")[0]
             
             if current_stock == 0:
                 status_label = "🚨 STARVED (Line Stopped)"
@@ -511,7 +528,7 @@ elif app_mode == "📊 Lineside Stock & Refill Analysis":
                 col_left, col_right = st.columns([2, 5])
                 
                 with col_left:
-                    st.subheader(f"📍 Station {ws_part} - {sub_part}")
+                    st.subheader(f"📍 Station {clean_ws_display} - {sub_part}")
                     st.markdown(f"Status: :{color_theme}[**{status_label}**]")
                     
                     max_capacity_est = max(30, rop_value + refill_qty)
@@ -525,6 +542,7 @@ elif app_mode == "📊 Lineside Stock & Refill Analysis":
                     starve_time = st.session_state.starvation_events.get(col_name, 0)
                     st.caption(f"⏱️ Accumulative Starvation Time: **{format_to_mmss(starve_time)}**")
                     st.caption(f"🏁 Route Loop Index: **{int(pt_data['distance_meters'])}m**")
+                    st.caption(f"🔢 Sequence Order: **#{ws_d['sequence_order']}**")
                 
                 with col_right:
                     chart_slice = st.session_state.chart_data[col_name].iloc[-300:]
