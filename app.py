@@ -11,12 +11,12 @@ def format_to_mmss(total_seconds):
     seconds = int(total_seconds) % 60
     return f"{minutes:02d}:{seconds:02d}"
 
-# --- 2. INITIALIZE GLOBAL STATE WITH DEFINED USER WORKSTATIONS ---
+# --- 2. INITIALIZE ARTIFACT GLOBAL STATE WITH USER EXACT GEOMETRY ---
 if "sim_time" not in st.session_state:
     st.session_state.sim_time = 0          
     st.session_state.trip_log = []         
     st.session_state.starvation_events = {}  
-    st.session_state.tugger_status = "Idle at Supermarket"
+    st.session_state.tugger_status = "Idle at Store"
     st.session_state.process_timer = -1   
     st.session_state.max_transit_secs = 1
     st.session_state.trip_counter = 0      
@@ -26,17 +26,17 @@ if "sim_time" not in st.session_state:
     st.session_state.active_delivery_qty = 0
     st.session_state.current_target_point = None
 
-    # Base line configurations with unified nested "Point A" tracking sub-drop nodes
-    # Evenly spaced layout track distances from 10% to 90% along the circular loop
+    # EXACT GEOMETRIC COORDINATES MAPPED OUT OF 100% TOTAL LOOP LENGTH:
+    # Top Lane (0% to 50% along loop): RA140 -> RA130 -> RA120 -> RA110
+    # Bottom Lane (50% to 100% along loop): RA150 -> RA160 -> RA170
     st.session_state.workstations = {
-        "RC100": {"sequence_order": 1, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 10}}},
-        "RA110": {"sequence_order": 2, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 21}}},
-        "RA120": {"sequence_order": 3, "sub_stations": {"Point A": {"inventory": 23, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_pct": 32}}},
-        "RA130": {"sequence_order": 4, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_pct": 43}}},
-        "RA140": {"sequence_order": 5, "sub_stations": {"Point A": {"inventory": 22, "rop": 10, "qty_per_pkg": 8,  "pkgs_per_trip": 4, "distance_pct": 54}}},
-        "RA150": {"sequence_order": 6, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 65}}},
-        "RA160": {"sequence_order": 7, "sub_stations": {"Point A": {"inventory": 26, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_pct": 76}}},
-        "RA170": {"sequence_order": 8, "sub_stations": {"Point A": {"inventory": 25, "rop": 15, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_pct": 88}}}
+        "RA140": {"lane": "top",    "sequence_order": 1, "sub_stations": {"Point A": {"inventory": 22, "rop": 10, "qty_per_pkg": 8,  "pkgs_per_trip": 4, "distance_pct": 10}}},
+        "RA130": {"lane": "top",    "sequence_order": 2, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_pct": 22}}},
+        "RA120": {"lane": "top",    "sequence_order": 3, "sub_stations": {"Point A": {"inventory": 23, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_pct": 34}}},
+        "RA110": {"lane": "top",    "sequence_order": 4, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 46}}},
+        "RA150": {"lane": "bottom", "sequence_order": 5, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 60}}},
+        "RA160": {"lane": "bottom", "sequence_order": 6, "sub_stations": {"Point A": {"inventory": 26, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_pct": 74}}},
+        "RA170": {"lane": "bottom", "sequence_order": 7, "sub_stations": {"Point A": {"inventory": 25, "rop": 15, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_pct": 88}}}
     }
     
     for ws_name, ws_data in st.session_state.workstations.items():
@@ -80,7 +80,7 @@ def advance_simulation(seconds):
     for _ in range(int(seconds)):
         st.session_state.sim_time += 1
         
-        # A. Takt Rate Processing Matrix (Staggered based on actual assembly sequence order)
+        # A. Takt Rate Processing Matrix
         for ws_name, ws_data in st.session_state.workstations.items():
             stagger_offset = (ws_data["sequence_order"] - 1) * master_takt_secs
             target_trigger_time = st.session_state.sim_time - stagger_offset
@@ -93,8 +93,8 @@ def advance_simulation(seconds):
                     else:
                         st.session_state.starvation_events[unique_key] += 1
 
-        # B. Circular Milk-Run Loop Dispatch Logic Engine (One-Way Continuous Path)
-        if st.session_state.tugger_status == "Idle at Supermarket":
+        # B. U-Shaped Milk-Run Dispatch Cycle Loop Engine
+        if st.session_state.tugger_status == "Idle at Store":
             st.session_state.tugger_pct = 0.0
             highest_urgency = -9999
             chosen_ws, chosen_sub = None, None
@@ -112,20 +112,20 @@ def advance_simulation(seconds):
                 st.session_state.current_target_point = (chosen_ws, chosen_sub)
                 p_data = st.session_state.workstations[chosen_ws]["sub_stations"][chosen_sub]
                 st.session_state.active_delivery_qty = p_data["qty_per_pkg"] * p_data["pkgs_per_trip"]
-                st.session_state.tugger_status = f"Loading at Supermarket for {chosen_ws}"
+                st.session_state.tugger_status = f"Loading at Start for {chosen_ws}"
                 st.session_state.trip_start_time = st.session_state.sim_time
                 st.session_state.process_timer = 20  
                 st.session_state.max_transit_secs = 20
                 
-        elif st.session_state.tugger_status.startswith("Loading at Supermarket"):
+        elif st.session_state.tugger_status.startswith("Loading at Start"):
             st.session_state.process_timer -= 1
             if st.session_state.process_timer <= 0:
                 w, s = st.session_state.current_target_point
-                st.session_state.tugger_status = f"One-Way Loop Delivery to {w}"
+                st.session_state.tugger_status = f"U-Loop Delivery to {w}"
                 st.session_state.process_timer = 45  
                 st.session_state.max_transit_secs = 45
                 
-        elif st.session_state.tugger_status.startswith("One-Way Loop Delivery"):
+        elif st.session_state.tugger_status.startswith("U-Loop Delivery"):
             st.session_state.process_timer -= 1
             w, s = st.session_state.current_target_point
             max_pos = st.session_state.workstations[w]["sub_stations"][s]["distance_pct"]
@@ -146,17 +146,16 @@ def advance_simulation(seconds):
                     st.session_state.workstations[w]["sub_stations"][s]["inventory"] += st.session_state.active_delivery_qty
                 
                 st.session_state.trip_counter += 1
-                st.session_state.tugger_status = "Continuing Circular Loop back to Supermarket"
+                st.session_state.tugger_status = "Continuing forward to Return Point"
                 st.session_state.process_timer = 45
                 st.session_state.max_transit_secs = 45
                 
-        elif st.session_state.tugger_status == "Continuing Circular Loop back to Supermarket":
+        elif st.session_state.tugger_status == "Continuing forward to Return Point":
             st.session_state.process_timer -= 1
             w, s = st.session_state.current_target_point
             max_pos = st.session_state.workstations[w]["sub_stations"][s]["distance_pct"]
             elapsed = st.session_state.max_transit_secs - st.session_state.process_timer
             ratio = elapsed / st.session_state.max_transit_secs
-            # Vehicle keeps driving FORWARD (towards 100%) to complete the single-direction loop
             st.session_state.tugger_pct = max_pos + (ratio * (100.0 - max_pos))
             
             if st.session_state.process_timer <= 0:
@@ -165,9 +164,9 @@ def advance_simulation(seconds):
                     "Trip ID": f"TRP-{st.session_state.trip_counter:03d}",
                     "Target Station Node": w,
                     "Payload Vol Refilled": f"{st.session_state.active_delivery_qty} units",
-                    "Total Circular Loop Duration": format_to_mmss(duration_secs)
+                    "Total Route Loop Duration": format_to_mmss(duration_secs)
                 })
-                st.session_state.tugger_status = "Idle at Supermarket"
+                st.session_state.tugger_status = "Idle at Store"
                 st.session_state.current_target_point = None
                 st.session_state.tugger_pct = 0.0
 
@@ -186,7 +185,7 @@ with c3:
     if st.button("🔄 Full Reset Plant State", use_container_width=True):
         st.session_state.sim_time = 0
         st.session_state.trip_log = []
-        st.session_state.tugger_status = "Idle at Supermarket"
+        st.session_state.tugger_status = "Idle at Store"
         st.session_state.current_target_point = None
         st.session_state.running = False
         st.session_state.tugger_pct = 0.0
@@ -196,8 +195,7 @@ with c3:
 
 # --- 6. VISUAL APP RENDER EXECUTION INTERFACE ---
 if app_mode == "🗺️ Live Simulation Map":
-    st.title("🗺️ Closed-Loop Continuous Supply Track Map")
-    st.markdown("💡 **One-Way Operational Rules:** The Tugger train moves strictly in a continuous circle. It departs from the Supermarket staging zone, targets the critical station node, and then proceeds *forward* in the same direction to pull back into the Supermarket docking bay.")
+    st.title("🗺️ Factory U-Shaped Flow Tracking Map")
     
     map_container_box = st.empty()
     status_msg_box = st.empty()
@@ -208,30 +206,37 @@ if app_mode == "🗺️ Live Simulation Map":
         tgt_tuple = st.session_state.current_target_point
         tgt_ws = tgt_tuple[0] if tgt_tuple else None
         
-        point_markers = ""
+        top_markers = ""
+        bottom_markers = ""
         info_cards = ""
         
+        # Segment out markers into Top and Bottom physical runways
         for ws_name, ws_data in st.session_state.workstations.items():
             for sub_name, d in ws_data["sub_stations"].items():
                 pos = d["distance_pct"]
                 is_active_target = (ws_name == tgt_ws)
-                
-                is_targeted = "background: #fa5252; color: white; border: 3px solid #fff; box-shadow: 0 0 20px #fa5252; transform: translateX(-50%) scale(1.15);" if is_active_target else "background: #343a40; color: #f8f9fa; border: 1px solid #495057;"
+                is_targeted = "background: #fa5252; color: white; border: 3px solid #fff; box-shadow: 0 0 20px #fa5252; transform: translateX(-50%) scale(1.1);" if is_active_target else "background: #343a40; color: #f8f9fa; border: 1px solid #495057;"
                 unique_key = f"{ws_name}_{sub_name}"
                 
-                point_markers += f"""
-                <div class="station-node-pin" style="left: {pos}%; {is_targeted}">
+                # HTML Pin Construct
+                pin_html = f"""
+                <div class="station-node-pin" style="left: {pos if ws_data['lane'] == 'top' else (pos - 50) * 2 + 5}%; {is_targeted}">
                     <div style="font-size: 13px; font-weight: bold;">📍 {ws_name}</div>
                     <div style="font-size: 10px; opacity: 0.9;">{sub_name}</div>
                     <div class="badge-seq">Seq #{ws_data['sequence_order']}</div>
                 </div>
                 """
                 
+                if ws_data["lane"] == "top":
+                    top_markers += pin_html
+                else:
+                    bottom_markers += pin_html
+                
                 card_style = "border-top: 5px solid #fa5252; background-color: #fff5f5;" if is_active_target else "border-top: 5px solid #1c7ed6;"
                 info_cards += f"""
                 <div class="kpi-card-block" style="{card_style}">
                     <div class="card-title">🏭 {ws_name}</div>
-                    <div class="card-stock">📦 {d['inventory']} <span style="font-size:12px; font-weight:normal; color:#495057;">units</span></div>
+                    <div class="card-stock">📦 {d['inventory']} <span style="font-size:12px; font-weight:normal; color:#495057;">u</span></div>
                     <div class="card-meta">
                         ROP: <b>{d['rop']} u</b> <br>
                         Shortage: <span style="color:#fa5252; font-weight:bold;">{format_to_mmss(st.session_state.starvation_events[unique_key])}</span>
@@ -239,48 +244,63 @@ if app_mode == "🗺️ Live Simulation Map":
                 </div>
                 """
                 
-        is_returning = False
-        if tgt_ws:
-            is_returning = pct > st.session_state.workstations[tgt_ws]["sub_stations"]["Point A"]["distance_pct"]
-            
-        tugger_label = "🚜 Circular Returning to Base" if is_returning else (f"🚜 Advancing to {tgt_ws}" if tgt_ws else "🚜 Standby at Bay")
-        color_class = "returning" if is_returning else ""
-        top_tugger_tag = f'<div class="tugger-truck {color_class}" style="left: {pct}%;">{tugger_label}</div>' if tgt_ws or pct > 0 else ''
+        # Handle animated tugger alignment position along both lanes
+        top_tugger_tag = ""
+        bottom_tugger_tag = ""
+        
+        if pct > 0:
+            if pct <= 50:
+                # Tugger on Top Lane moving Left to Right
+                scaled_pos = pct * 2 - 5
+                top_tugger_tag = f'<div class="tugger-truck" style="left: {scaled_pos}%;">🚜 Delivery Train</div>'
+            else:
+                # Tugger on Bottom Lane moving Right to Left
+                scaled_pos = (pct - 50) * 2 + 5
+                bottom_tugger_tag = f'<div class="tugger-truck returning" style="left: {scaled_pos}%;">🚜 Returning Train</div>'
 
         return f"""
         <style>
-            .floorplan-wrapper {{ background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 16px; padding: 32px; font-family: system-ui, -apple-system, sans-serif; }}
-            .cards-outer-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 20px; }}
+            .floorplan-wrapper {{ background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 16px; padding: 32px; font-family: system-ui, sans-serif; }}
+            .cards-outer-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-top: 30px; }}
             .kpi-card-block {{ background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.03); text-align: center; }}
-            .card-title {{ font-weight: bold; font-size: 14px; color: #212529; margin-bottom: 4px; }}
+            .card-title {{ font-weight: bold; font-size: 14px; color: #212529; }}
             .card-stock {{ font-size: 22px; font-weight: 800; color: #1c7ed6; margin: 4px 0; }}
             .card-meta {{ font-size: 11px; color: #6c757d; line-height: 1.4; border-top: 1px solid #f1f3f5; padding-top: 4px; margin-top: 6px; }}
             
-            .circle-loop-track {{ height: 45px; background: linear-gradient(180deg, #e9ecef 0%, #ced4da 100%); border-top: 4px dashed #868e96; border-bottom: 4px dashed #868e96; position: relative; margin: 90px 0; border-radius: 8px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }}
+            .runway-lane-track {{ height: 50px; background: linear-gradient(180deg, #e9ecef 0%, #ced4da 100%); border-top: 4px dashed #868e96; border-bottom: 4px dashed #868e96; position: relative; margin: 60px 0; border-radius: 6px; }}
+            .lane-label {{ position: absolute; left: 20px; top: 14px; font-size: 14px; font-weight: 800; color: #adb5bd; letter-spacing: 2px; text-transform: uppercase; }}
             
-            /* Combined Unified Start/End Hub representing the same physical location */
-            .supermarket-base-badge {{ position: absolute; left: 0%; top: -38px; background: #2b8a3e; color: white; padding: 6px 16px; border-radius: 20px; font-size: 11px; font-weight: bold; z-index: 15; transform: translateX(-50%); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
-            .supermarket-return-badge {{ position: absolute; left: 100%; top: -38px; background: #2b8a3e; color: white; padding: 6px 16px; border-radius: 20px; font-size: 11px; font-weight: bold; z-index: 15; transform: translateX(-50%); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+            .docking-terminal {{ position: absolute; left: 0%; top: -38px; background: #2b8a3e; color: white; padding: 6px 16px; border-radius: 20px; font-size: 11px; font-weight: bold; z-index: 15; transform: translateX(-50%); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+            .turnaround-curve {{ position: absolute; right: -40px; top: 25px; width: 40px; height: 165px; border: 4px dashed #868e96; border-left: none; border-radius: 0 40px 40px 0; z-index: 1; }}
             
             .station-node-pin {{ position: absolute; top: -38px; padding: 8px 14px; border-radius: 8px; z-index: 12; text-align: center; line-height: 1.3; box-shadow: 0 6px 12px rgba(0,0,0,0.08); transition: all 0.2s; min-width: 90px; transform: translateX(-50%); }}
             .badge-seq {{ background: rgba(0,0,0,0.1); padding: 1px 4px; border-radius: 3px; font-size: 9px; display: inline-block; margin-top: 3px; }}
             
-            .tugger-truck {{ position: absolute; top: -56px; background: #1c7ed6; color: white; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: bold; transform: translateX(-50%); z-index: 20; white-space: nowrap; transition: left 0.05s linear; box-shadow: 0 8px 20px rgba(28,126,214,0.3); border: 2px solid #fff; }}
+            .tugger-truck {{ position: absolute; top: -56px; background: #1c7ed6; color: white; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: bold; transform: translateX(-50%); z-index: 20; white-space: nowrap; box-shadow: 0 8px 20px rgba(28,126,214,0.3); border: 2px solid #fff; }}
             .tugger-truck.returning {{ background: #e03131; box-shadow: 0 8px 20px rgba(224,49,49,0.3); }}
-            .supermarket-hub-banner {{ background: #2b8a3e; color: white; padding: 14px; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
+            .flow-arrow {{ position: absolute; right: 20px; top: 12px; font-size: 20px; color: #adb5bd; font-weight: bold; }}
         </style>
         <div class="floorplan-wrapper">
-            <div class="supermarket-hub-banner">
-                🏪 Unified Logistics Supermarket Hub (Start & Return Point)
-            </div>
-            
-            <div style="position: relative; margin: 80px 40px; padding: 10px 0;">
-                <div class="circle-loop-track">
-                    <div class="supermarket-base-badge">🛫 DEPOT START</div>
-                    {point_markers}
+            <div style="position: relative; margin: 40px;">
+                
+                <div class="turnaround-curve"></div>
+
+                <div class="runway-lane-track">
+                    <div class="docking-terminal">🛫 START HUB</div>
+                    <div class="lane-label">▶️ TOP SUPPLY RUNWAY LANE</div>
+                    <div class="flow-arrow">➔</div>
+                    {top_markers}
                     {top_tugger_tag}
-                    <div class="supermarket-return-badge">🛬 DEPOT RETURN</div>
                 </div>
+
+                <div class="runway-lane-track" style="margin-top: 100px;">
+                    <div class="docking-terminal">🛬 RETURN POINT</div>
+                    <div class="lane-label" style="color: #ffc9c9;">◀️ BOTTOM RETURN RUNWAY LANE</div>
+                    <div class="flow-arrow" style="left: 20px; right: auto;">Selection ➔</div>
+                    {bottom_markers}
+                    {bottom_tugger_tag}
+                </div>
+                
             </div>
 
             <div class="cards-outer-container">{info_cards}</div>
