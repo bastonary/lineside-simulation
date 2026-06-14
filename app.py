@@ -18,8 +18,8 @@ def parse_mmss_to_seconds(mmss_str):
     except:
         return 0
 
-# --- 2. INITIALIZE GLOBAL STATE WITH ACTUAL FACTORY SCALE ---
-SHIFT_MAX_SECONDS = 480 * 60  # 480 Minutes = 28,800 Seconds
+# --- 2. INITIALIZE GLOBAL STATE ---
+SHIFT_MAX_SECONDS = 480 * 60  # 480 Minutes
 
 if "sim_time" not in st.session_state:
     st.session_state.sim_time = 0          
@@ -32,18 +32,21 @@ if "sim_time" not in st.session_state:
     st.session_state.running = False       
     st.session_state.tugger_pct = 0.0      
     st.session_state.trip_start_time = 0   
-    st.session_state.active_delivery_qty = 0
-    st.session_state.current_target_point = None
+    
+    # Advanced Multi-Drop Variables
+    st.session_state.active_route_plan = []  # List of target stations in current round
+    st.session_state.current_route_index = 0  # Where we are in the active route plan
+    st.session_state.cargo_manifest = {}     # Tracks how many units go to each station this round
 
-    # REAL Footprint Configurations (Max Route scaled to ~120m total loop run)
+    # Real foot footprint dimensions (~120 meters max)
     st.session_state.workstations = {
         "RA140": {"lane": "top",    "sequence_order": 4, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 20}}},
         "RA130": {"lane": "top",    "sequence_order": 3, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 30}}},
         "RA120": {"lane": "top",    "sequence_order": 2, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 35}}},
-        "RA110": {"lane": "top",    "sequence_order": 1, "sub_stations": {"Point A": {"inventory": 6,  "rop": 3,  "qty_per_pkg": 3,  "pkgs_per_trip": 1, "distance_meters": 40}}},
+        "RA110": {"lane": "top",    "sequence_order": 1, "sub_stations": {"Point A": {"inventory": 6,  "rop": 3,  "qty_per_pkg": 3,  "pkgs_per_trip": 1, "distance_meters": 40}}}, # Specialized
         "RA170": {"lane": "bottom", "sequence_order": 5, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 70}}},
         "RA160": {"lane": "bottom", "sequence_order": 6, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 90}}},
-        "RA150": {"lane": "bottom", "sequence_order": 7, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 115}}} # Longest Route (~120m)
+        "RA150": {"lane": "bottom", "sequence_order": 7, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 115}}}
     }
     
     for ws_name, ws_data in st.session_state.workstations.items():
@@ -63,83 +66,20 @@ master_takt_mins = st.sidebar.number_input("Whole Line Master Takt (Minutes)", m
 master_takt_secs = int(master_takt_mins * 60)
 
 st.sidebar.header("🚜 Logistics Towing Properties")
-# Scaled to actual workshop floor speed (e.g., standard indoor tugger caution speed 3.5 km/h)
 speed_kmh = st.sidebar.number_input("Tugger Travel Speed (km/h)", min_value=0.5, max_value=20.0, value=3.5, step=0.1)
 speed_ms = (speed_kmh * 1000.0) / 3600.0
 
 st.sidebar.header("⏳ Process Handling Overhead Delays")
-# Fixed delays to account for human handling time, matching your 8-minute total cycle record
 staging_delay = st.sidebar.number_input("Store Staging/Loading Delay (Secs)", min_value=0, value=120)
 drop_delay = st.sidebar.number_input("Lineside Unloading Delay (Secs)", min_value=0, value=120)
-
-# --- DYNAMIC NODE ADDITION/REMOVAL ---
-st.sidebar.header("🛠️ Floorplan Modification Hub")
-mod_action = st.sidebar.selectbox("Choose Structural Action:", ["Modify Station Data", "Add New Station/Drop Point", "Remove Existing Node"])
-
-if mod_action == "Modify Station Data":
-    flat_subs = [f"{ws_k} -> {sub_k}" for ws_k, ws_v in st.session_state.workstations.items() for sub_k in ws_v["sub_stations"].keys()]
-    selected_flat = st.sidebar.selectbox("Select Station Drop to Edit:", flat_subs if flat_subs else ["None"])
-
-    if selected_flat and selected_flat != "None":
-        ws_target, sub_target = selected_flat.split(" -> ")
-        pt_ref = st.session_state.workstations[ws_target]["sub_stations"][sub_target]
-        
-        st.markdown(f"⚙️ **Editing:** `{ws_target}`")
-        st.session_state.workstations[ws_target]["sequence_order"] = st.sidebar.number_input("Production Start Seq Order:", min_value=1, max_value=20, value=int(st.session_state.workstations[ws_target]["sequence_order"]))
-        st.session_state.workstations[ws_target]["lane"] = st.sidebar.selectbox("Visual Track Lane Line:", ["top", "bottom"], index=0 if st.session_state.workstations[ws_target]["lane"] == "top" else 1)
-        pt_ref["distance_meters"] = st.sidebar.number_input("Meter Distance from Start Hub:", min_value=5, max_value=200, value=int(pt_ref["distance_meters"]))
-        pt_ref["inventory"] = st.sidebar.number_input("Live Stock Level (Units)", min_value=0, value=int(pt_ref["inventory"]))
-        pt_ref["rop"] = st.sidebar.number_input("Reorder Threshold (ROP)", min_value=0, value=int(pt_ref["rop"]))
-        pt_ref["qty_per_pkg"] = st.sidebar.number_input("Qty Per Package:", min_value=1, value=int(pt_ref["qty_per_pkg"]))
-        pt_ref["pkgs_per_trip"] = st.sidebar.number_input("Packages Per Trip:", min_value=1, value=int(pt_ref["pkgs_per_trip"]))
-
-elif mod_action == "Add New Station/Drop Point":
-    st.markdown("### ➕ Register New Station Node")
-    new_ws_name = st.sidebar.text_input("Workstation Name (e.g. RA180):", "RA180")
-    new_sub_name = st.sidebar.text_input("Sub-Station Drop Point Identifier:", "Point A")
-    new_lane = st.sidebar.selectbox("Track Layout Lane Position:", ["top", "bottom"])
-    new_seq = st.sidebar.number_input("Production Consumed Sequence Position:", min_value=1, value=5)
-    new_dist = st.sidebar.number_input("Route Distance from Hub (Meters):", min_value=5, max_value=200, value=60)
-    
-    new_stock = st.sidebar.number_input("Initial Live Stock:", min_value=0, value=24)
-    new_rop = st.sidebar.number_input("Reorder Boundary Point (ROP):", min_value=0, value=12)
-    new_qty_pkg = st.sidebar.number_input("Box Capacity Size (Qty/Pkg):", min_value=1, value=12)
-    new_pkg_trip = st.sidebar.number_input("Boxes Cargo per Move (Pkg/Trip):", min_value=1, value=1)
-    
-    if st.sidebar.button("💾 Apply & Inject Node to Map"):
-        if new_ws_name not in st.session_state.workstations:
-            st.session_state.workstations[new_ws_name] = {"lane": new_lane, "sequence_order": new_seq, "sub_stations": {}}
-        
-        st.session_state.workstations[new_ws_name]["sub_stations"][new_sub_name] = {
-            "inventory": new_stock, "rop": new_rop, "qty_per_pkg": new_qty_pkg, "pkgs_per_trip": new_pkg_trip, "distance_meters": new_dist
-        }
-        st.session_state.starvation_events[f"{new_ws_name}_{new_sub_name}"] = 0
-        st.success(f"Successfully integrated {new_ws_name} into floor loop matrix.")
-        st.rerun()
-
-elif mod_action == "Remove Existing Node":
-    st.markdown("### ❌ Extract Node from Matrix")
-    flat_subs = [f"{ws_k} -> {sub_k}" for ws_k, ws_v in st.session_state.workstations.items() for sub_k in ws_v["sub_stations"].keys()]
-    target_to_delete = st.sidebar.selectbox("Select Station Drop to Remove:", flat_subs if flat_subs else ["None"])
-    
-    if st.sidebar.button("🗑️ Delete Selected Node Permanently", type="primary"):
-        if target_to_delete and target_to_delete != "None":
-            del_ws, del_sub = target_to_delete.split(" -> ")
-            if del_ws in st.session_state.workstations:
-                if del_sub in st.session_state.workstations[del_ws]["sub_stations"]:
-                    del st.session_state.workstations[del_ws]["sub_stations"][del_sub]
-                if not st.session_state.workstations[del_ws]["sub_stations"]:
-                    del st.session_state.workstations[del_ws]
-            st.warning(f"Extracted {target_to_delete} from logistics loop tracking path.")
-            st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚡ Simulation Engine Speed")
 speed_acceleration = st.sidebar.slider("Speed Steps (seconds/frame)", min_value=1, max_value=120, value=30)
 
-# --- 4. ENGINE RUNTIME LOGIC (SCALED TO ACTUAL 120M FOOTPRINT) ---
+# --- 4. ENGINE RUNTIME LOGIC (BATCH & ROUTE) ---
 def advance_simulation(seconds):
-    total_loop_meters = 120.0  # Actual Maximum Track footprint
+    total_loop_meters = 120.0
     
     for _ in range(int(seconds)):
         if st.session_state.sim_time >= SHIFT_MAX_SECONDS:
@@ -161,112 +101,148 @@ def advance_simulation(seconds):
                     else:
                         st.session_state.starvation_events[unique_key] += 1
 
-        # B. Real Scaled Physics Movement Logic
+        # B. Multi-Drop Intelligent Logistics Loop
         if st.session_state.tugger_status == "Idle at Start Hub":
             st.session_state.tugger_pct = 0.0
-            highest_urgency = -9999
-            chosen_ws, chosen_sub = None, None
             
+            # Find all stations currently needing materials, ranked by highest inventory deficit
+            needed_requests = []
             for ws_name, ws_data in st.session_state.workstations.items():
                 for sub_name, sub_data in ws_data["sub_stations"].items():
                     if sub_data["inventory"] <= sub_data["rop"]:
-                        urgency = sub_data["rop"] - sub_data["inventory"]
-                        if urgency > highest_urgency:
-                            highest_urgency = urgency
-                            chosen_sub = sub_name
-                            chosen_ws = ws_name
+                        deficit = sub_data["rop"] - sub_data["inventory"]
+                        needed_requests.append({
+                            "ws": ws_name, "sub": sub_name, "deficit": deficit,
+                            "pkg_size": sub_data["qty_per_pkg"], "distance": sub_data["distance_meters"]
+                        })
             
-            if chosen_sub:
-                st.session_state.current_target_point = (chosen_ws, chosen_sub)
-                p_data = st.session_state.workstations[chosen_ws]["sub_stations"][chosen_sub]
-                st.session_state.active_delivery_qty = p_data["qty_per_pkg"] * p_data["pkgs_per_trip"]
+            if needed_requests:
+                # Sort requests by biggest deficit urgency first
+                needed_requests.sort(key=lambda x: x["deficit"], reverse=True)
+                primary = needed_requests[0]
                 
-                st.session_state.tugger_status = f"Staging Cargo for {chosen_ws}"
+                selected_stops = [primary]
+                
+                # Capacity-Based Batching Logic
+                if primary["pkg_size"] != 3:  # Only look for a second package if the primary isn't the specialized 3-unit box
+                    for secondary in needed_requests[1:]:
+                        if secondary["pkg_size"] != 3 and secondary["ws"] != primary["ws"]:
+                            selected_stops.append(secondary)
+                            break # Found second 12-unit package, stop looking
+                
+                # Sort selected stops by distance (Closest Station First)
+                selected_stops.sort(key=lambda x: x["distance"])
+                
+                st.session_state.active_route_plan = selected_stops
+                st.session_state.current_route_index = 0
+                st.session_state.cargo_manifest = {
+                    s["ws"]: s["pkg_size"] for s in selected_stops
+                }
+                
+                # Set up the staging delay
+                st.session_state.tugger_status = "Staging Cargo at Store"
                 st.session_state.trip_start_time = st.session_state.sim_time
-                st.session_state.process_timer = staging_delay  
+                st.session_state.process_timer = staging_delay
                 st.session_state.max_transit_secs = max(1, staging_delay)
                 
-        elif st.session_state.tugger_status.startswith("Staging Cargo"):
+        elif st.session_state.tugger_status == "Staging Cargo at Store":
             st.session_state.process_timer -= 1
             if st.session_state.process_timer <= 0:
-                w, s = st.session_state.current_target_point
-                if w in st.session_state.workstations and s in st.session_state.workstations[w]["sub_stations"]:
-                    target_distance = st.session_state.workstations[w]["sub_stations"][s]["distance_meters"]
-                else:
-                    st.session_state.tugger_status = "Idle at Start Hub"
-                    continue
+                # Move towards the first assigned station
+                idx = st.session_state.current_route_index
+                target_ws = st.session_state.active_route_plan[idx]["ws"]
+                target_dist = st.session_state.active_route_plan[idx]["distance"]
                 
-                calc_transit_seconds = int(target_distance / speed_ms)
-                st.session_state.tugger_status = f"Moving to {w}"
-                st.session_state.process_timer = max(1, calc_transit_seconds)  
+                calc_transit_seconds = int(target_dist / speed_ms)
+                st.session_state.tugger_status = f"Moving to {target_ws}"
+                st.session_state.process_timer = max(1, calc_transit_seconds)
                 st.session_state.max_transit_secs = max(1, calc_transit_seconds)
                 
         elif st.session_state.tugger_status.startswith("Moving to"):
             st.session_state.process_timer -= 1
-            w, s = st.session_state.current_target_point
-            if w in st.session_state.workstations and s in st.session_state.workstations[w]["sub_stations"]:
-                target_distance = st.session_state.workstations[w]["sub_stations"][s]["distance_meters"]
-            else:
-                st.session_state.tugger_status = "Idle at Start Hub"
-                continue
+            idx = st.session_state.current_route_index
+            active_stop = st.session_state.active_route_plan[idx]
+            target_ws = active_stop["ws"]
+            target_dist = active_stop["distance"]
+            
+            # Figure out starting point of this leg for the animation positioning
+            start_dist = 0.0 if idx == 0 else st.session_state.active_route_plan[idx-1]["distance"]
+            leg_distance = target_dist - start_dist
             
             elapsed = st.session_state.max_transit_secs - st.session_state.process_timer
-            ratio = elapsed / st.session_state.max_transit_secs
+            ratio = min(1.0, elapsed / st.session_state.max_transit_secs)
             
-            current_meters = ratio * target_distance
+            current_meters = start_dist + (ratio * leg_distance)
             st.session_state.tugger_pct = (current_meters / total_loop_meters) * 100.0
             
             if st.session_state.process_timer <= 0:
-                st.session_state.tugger_pct = (target_distance / total_loop_meters) * 100.0  
-                st.session_state.tugger_status = f"Dropping at {w}"
-                st.session_state.process_timer = drop_delay  
+                st.session_state.tugger_pct = (target_dist / total_loop_meters) * 100.0
+                st.session_state.tugger_status = f"Dropping at {target_ws}"
+                st.session_state.process_timer = drop_delay
                 st.session_state.max_transit_secs = max(1, drop_delay)
                 
         elif st.session_state.tugger_status.startswith("Dropping at"):
             st.session_state.process_timer -= 1
             if st.session_state.process_timer <= 0:
-                w, s = st.session_state.current_target_point
+                idx = st.session_state.current_route_index
+                active_stop = st.session_state.active_route_plan[idx]
+                w, s = active_stop["ws"], active_stop["sub"]
+                
+                # Execute replenishment
                 if w in st.session_state.workstations and s in st.session_state.workstations[w]["sub_stations"]:
-                    st.session_state.workstations[w]["sub_stations"][s]["inventory"] += st.session_state.active_delivery_qty
-                    target_distance = st.session_state.workstations[w]["sub_stations"][s]["distance_meters"]
+                    qty = st.session_state.cargo_manifest[w]
+                    st.session_state.workstations[w]["sub_stations"][s]["inventory"] += qty
+                
+                # Check if there is another scheduled stop left in this round
+                if idx + 1 < len(st.session_state.active_route_plan):
+                    st.session_state.current_route_index += 1
+                    next_ws = st.session_state.active_route_plan[idx+1]["ws"]
+                    next_dist = st.session_state.active_route_plan[idx+1]["distance"]
+                    
+                    leg_distance = next_dist - active_stop["distance"]
+                    calc_next_seconds = int(leg_distance / speed_ms)
+                    
+                    st.session_state.tugger_status = f"Moving to {next_ws}"
+                    st.session_state.process_timer = max(1, calc_next_seconds)
+                    st.session_state.max_transit_secs = max(1, calc_next_seconds)
                 else:
-                    st.session_state.tugger_status = "Idle at Start Hub"
-                    continue
-                
-                st.session_state.trip_counter += 1
-                remaining_return_distance = total_loop_meters - target_distance
-                calc_return_seconds = int(remaining_return_distance / speed_ms)
-                
-                st.session_state.tugger_status = "Completing Return Loop"
-                st.session_state.process_timer = max(1, calc_return_seconds)
-                st.session_state.max_transit_secs = max(1, calc_return_seconds)
-                
+                    # No more drops left! Complete the remaining circuit loop back to store
+                    st.session_state.trip_counter += 1
+                    remaining_return_distance = total_loop_meters - active_stop["distance"]
+                    calc_return_seconds = int(remaining_return_distance / speed_ms)
+                    
+                    st.session_state.tugger_status = "Completing Return Loop"
+                    st.session_state.process_timer = max(1, calc_return_seconds)
+                    st.session_state.max_transit_secs = max(1, calc_return_seconds)
+                    
         elif st.session_state.tugger_status == "Completing Return Loop":
             st.session_state.process_timer -= 1
-            w, s = st.session_state.current_target_point
-            if w in st.session_state.workstations and s in st.session_state.workstations[w]["sub_stations"]:
-                target_distance = st.session_state.workstations[w]["sub_stations"][s]["distance_meters"]
-            else:
-                st.session_state.tugger_status = "Idle at Start Hub"
-                continue
+            last_stop_dist = st.session_state.active_route_plan[-1]["distance"]
             
             elapsed = st.session_state.max_transit_secs - st.session_state.process_timer
-            ratio = elapsed / st.session_state.max_transit_secs
+            ratio = min(1.0, elapsed / st.session_state.max_transit_secs)
             
-            current_meters = target_distance + (ratio * (total_loop_meters - target_distance))
+            current_meters = last_stop_dist + (ratio * (total_loop_meters - last_stop_dist))
             st.session_state.tugger_pct = (current_meters / total_loop_meters) * 100.0
             
             if st.session_state.process_timer <= 0:
+                # Log metrics for the trip record ledger
                 duration_secs = st.session_state.sim_time - st.session_state.trip_start_time
+                route_summary = " + ".join([s["ws"] for s in st.session_state.active_route_plan])
+                total_load = sum(st.session_state.cargo_manifest.values())
+                
                 st.session_state.trip_log.append({
                     "Trip ID": f"TRP-{st.session_state.trip_counter:03d}",
-                    "Target Node": w,
-                    "Distance (m)": f"{int(target_distance)}m",
-                    "Load Quantity": f"{st.session_state.active_delivery_qty} u",
+                    "Target Route": route_summary,
+                    "Total Drops": len(st.session_state.active_route_plan),
+                    "Load Quantity": f"{total_load} u",
                     "Total Cycle Duration": format_to_mmss(duration_secs)
                 })
+                
+                # Reset layout states for the next round
                 st.session_state.tugger_status = "Idle at Start Hub"
-                st.session_state.current_target_point = None
+                st.session_state.active_route_plan = []
+                st.session_state.cargo_manifest = {}
                 st.session_state.tugger_pct = 0.0
 
     snap = {}
@@ -290,7 +266,8 @@ with c3:
         st.session_state.sim_time = 0
         st.session_state.trip_log = []
         st.session_state.tugger_status = "Idle at Start Hub"
-        st.session_state.current_target_point = None
+        st.session_state.active_route_plan = []
+        st.session_state.cargo_manifest = {}
         st.session_state.running = False
         st.session_state.tugger_pct = 0.0
         for p in list(st.session_state.starvation_events.keys()):
@@ -313,8 +290,9 @@ if app_mode == "🗺️ Live Simulation Map":
 
     def generate_html_floorplan():
         pct = st.session_state.tugger_pct
-        tgt_tuple = st.session_state.current_target_point
-        tgt_ws = tgt_tuple[0] if tgt_tuple else None
+        
+        # Track active target highlight across the routing sequence array
+        active_route_targets = [s["ws"] for s in st.session_state.active_route_plan]
         
         station_markers = ""
         info_cards = ""
@@ -322,11 +300,11 @@ if app_mode == "🗺️ Live Simulation Map":
         for ws_name, ws_data in st.session_state.workstations.items():
             for sub_name, d in ws_data["sub_stations"].items():
                 m_range = d["distance_meters"]
-                is_active_target = (ws_name == tgt_ws)
+                
+                is_active_target = (ws_name in active_route_targets)
                 is_targeted = "background: #fa5252; color: white; border: 2px solid #fff; box-shadow: 0 0 12px #fa5252; transform: translate(-50%, -50%) scale(1.05);" if is_active_target else "background: #343a40; color: #f8f9fa; border: 1px solid #495057; transform: translate(-50%, -50%);"
                 unique_key = f"{ws_name}_{sub_name}"
                 
-                # Proportional x placement matching actual 120m bounds
                 if ws_data["lane"] == "top":
                     x_pos = 20.0 + ((m_range - 10.0) / 50.0) * 65.0
                     y_pos = 20.0
@@ -348,7 +326,7 @@ if app_mode == "🗺️ Live Simulation Map":
                     <div class="card-title">🏭 {ws_name} <span style="font-size:10px; color:#6c757d;">({int(m_range)}m)</span></div>
                     <div class="card-stock">📦 {d['inventory']} <span style="font-size:11px; color:#495057;">u</span></div>
                     <div class="card-meta">
-                        Pack size: <b>{d['qty_per_pkg']}u x {d['pkgs_per_trip']}</b><br>
+                        Pack size: <b>{d['qty_per_pkg']}u</b><br>
                         ROP: <b>{d['rop']} u</b><br>
                         Shortage: <span style="color:#fa5252; font-weight:bold;">{format_to_mmss(shortage_val)}</span>
                     </div>
@@ -398,13 +376,15 @@ if app_mode == "🗺️ Live Simulation Map":
             advance_simulation(speed_acceleration)
             map_container_box.html(generate_html_floorplan())
             
-            status_msg_box.info(f"🚜 **Tugger Fleet Dispatch Status:** `{st.session_state.tugger_status}` (Remaining: `{st.session_state.process_timer}s`)")
+            status_msg_box.info(f"🚜 **Tugger Fleet Dispatch Status:** `{st.session_state.tugger_status}` (Remaining Link Delay Timer: `{st.session_state.process_timer}s`)")
             
             with kpi_metric_row.container():
                 m1, m2, m3 = st.columns(3)
                 m1.metric("⏱️ Simulation Runtime Elapsed", format_to_mmss(st.session_state.sim_time))
-                m2.metric("🚜 Completed Loop Runs", f"{st.session_state.trip_counter} Cycles")
-                m3.metric("📦 Car Active Payload Volume", f"{st.session_state.active_delivery_qty} units")
+                m2.metric("🚜 Completed Round Loops", f"{st.session_state.trip_counter} Runs")
+                
+                total_manifest_units = sum(st.session_state.cargo_manifest.values())
+                m3.metric("📦 Active Multi-Drop Trailer Payload", f"{total_manifest_units} units")
             
             time.sleep(0.04)
             if st.session_state.sim_time >= SHIFT_MAX_SECONDS:
@@ -439,10 +419,10 @@ elif app_mode == "📊 Lineside Stock & Refill Analysis":
         t_col4.metric("📈 Total Round Dispatches", f"{len(df_trips)} Runs")
         
         with st.container(border=True):
-            st.markdown("**📊 Loop Duration Spectrum by Target Workstation Location (Seconds)**")
-            chart_data_trips = df_trips[["Target Node", "duration_secs"]].copy()
+            st.markdown("**📊 Loop Duration Spectrum by Target Route Run Combinations (Seconds)**")
+            chart_data_trips = df_trips[["Target Route", "duration_secs"]].copy()
             chart_data_trips = chart_data_trips.rename(columns={"duration_secs": "Round Time Duration (Seconds)"})
-            st.bar_chart(chart_data_trips, x="Target Node", y="Round Time Duration (Seconds)", height=200)
+            st.bar_chart(chart_data_trips, x="Target Route", y="Round Time Duration (Seconds)", height=220)
 
     st.markdown("---")
     st.header("📉 Individual Sub-Station Shelf Buffer Profiles")
