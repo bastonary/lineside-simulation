@@ -73,7 +73,7 @@ st.sidebar.header("⏳ Process Handling Overhead Delays")
 staging_delay = st.sidebar.number_input("Store Staging/Loading Delay (Secs)", min_value=0, value=120)
 drop_delay = st.sidebar.number_input("Lineside Unloading Delay (Secs)", min_value=0, value=120)
 
-# --- RESTORED: FLOORPLAN MODIFICATION HUB ---
+# --- FLOORPLAN MODIFICATION HUB ---
 st.sidebar.header("🛠️ Floorplan Modification Hub")
 mod_action = st.sidebar.selectbox("Choose Structural Action:", ["Modify Station Data", "Add New Station/Drop Point", "Remove Existing Node"])
 
@@ -179,12 +179,14 @@ def advance_simulation(seconds):
                 primary = needed_requests[0]
                 selected_stops = [primary]
                 
-                # Capacity-Based Batching Constraint (Skip pairing if primary uses 3-unit box)
+                # CONDITION IMPLEMENTATION:
+                # If primary is 3 units/pkg, it travels strictly 1 by 1 (no batching)
+                # If primary is 12 units/pkg, it cannot mix with 3 units/pkg
                 if primary["pkg_size"] != 3:  
                     for secondary in needed_requests[1:]:
                         if secondary["pkg_size"] != 3 and secondary["ws"] != primary["ws"]:
                             selected_stops.append(secondary)
-                            break 
+                            break # Found 2nd standard package, close the trip batch
                 
                 # Route Sorting (Closest Station First)
                 selected_stops.sort(key=lambda x: x["distance"])
@@ -367,9 +369,12 @@ if app_mode == "🗺️ Live Simulation Map":
                 
                 card_style = "border-top: 4px solid #fa5252; background-color: #fff5f5;" if is_active_target else "border-top: 4px solid #1c7ed6;"
                 shortage_val = st.session_state.starvation_events.get(unique_key, 0)
+                
+                # FIXED: ADDED DROP POINT IDENTIFIER DIRECTLY BELOW WORKSTATION NAME
                 info_cards += f"""
                 <div class="kpi-card-block" style="{card_style}">
-                    <div class="card-title">🏭 {ws_name} <span style="font-size:10px; color:#6c757d;">({int(m_range)}m)</span></div>
+                    <div class="card-title">🏭 {ws_name}</div>
+                    <div style="font-size: 11px; font-weight: 600; color: #495057; margin-bottom: 4px;">📍 {sub_name} <span style="font-size:10px; color:#868e96;">({int(m_range)}m)</span></div>
                     <div class="card-stock">📦 {d['inventory']} <span style="font-size:11px; color:#495057;">u</span></div>
                     <div class="card-meta">
                         Pack size: <b>{d['qty_per_pkg']}u</b><br>
@@ -398,7 +403,7 @@ if app_mode == "🗺️ Live Simulation Map":
             .floorplan-wrapper {{ background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 12px; padding: 20px; font-family: system-ui, sans-serif; }}
             .cards-outer-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; margin-top: 20px; }}
             .kpi-card-block {{ background: #ffffff; border: 1px solid #dee2e6; border-radius: 6px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.01); }}
-            .card-title {{ font-weight: bold; font-size: 13px; color: #212529; }}
+            .card-title {{ font-weight: bold; font-size: 14px; color: #212529; margin-bottom: 2px; }}
             .card-stock {{ font-size: 18px; font-weight: 800; color: #1c7ed6; margin: 2px 0; }}
             .card-meta {{ font-size: 10.5px; color: #6c757d; border-top: 1px solid #f1f3f5; padding-top: 4px; margin-top: 4px; line-height: 1.4; }}
             .loop-track-container {{ height: 140px; border: 4px solid #e03131; border-radius: 70px; position: relative; margin: 20px 10px; background: #ffffff; }}
@@ -506,7 +511,7 @@ elif app_mode == "📊 Lineside Stock & Refill Analysis":
                 col_left, col_right = st.columns([2, 5])
                 
                 with col_left:
-                    st.subheader(f"📍 Station {ws_part}")
+                    st.subheader(f"📍 Station {ws_part} - {sub_part}")
                     st.markdown(f"Status: :{color_theme}[**{status_label}**]")
                     
                     max_capacity_est = max(30, rop_value + refill_qty)
