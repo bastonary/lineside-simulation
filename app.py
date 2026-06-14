@@ -16,7 +16,7 @@ if "sim_time" not in st.session_state:
     st.session_state.sim_time = 0          
     st.session_state.trip_log = []         
     st.session_state.starvation_events = {}  
-    st.session_state.tugger_status = "Idle at Store"
+    st.session_state.tugger_status = "Idle at Supermarket"
     st.session_state.process_timer = -1   
     st.session_state.max_transit_secs = 1
     st.session_state.trip_counter = 0      
@@ -27,15 +27,16 @@ if "sim_time" not in st.session_state:
     st.session_state.current_target_point = None
 
     # Base line configurations with unified nested "Point A" tracking sub-drop nodes
+    # Evenly spaced layout track distances from 10% to 90% along the circular loop
     st.session_state.workstations = {
-        "RC100": {"sequence_order": 8, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 12}}},
-        "RA110": {"sequence_order": 7, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 24}}},
-        "RA120": {"sequence_order": 6, "sub_stations": {"Point A": {"inventory": 23, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_pct": 36}}},
-        "RA130": {"sequence_order": 5, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_pct": 48}}},
-        "RA140": {"sequence_order": 4, "sub_stations": {"Point A": {"inventory": 22, "rop": 10, "qty_per_pkg": 8,  "pkgs_per_trip": 4, "distance_pct": 60}}},
-        "RA150": {"sequence_order": 3, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 72}}},
-        "RA160": {"sequence_order": 2, "sub_stations": {"Point A": {"inventory": 26, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_pct": 84}}},
-        "RA170": {"sequence_order": 1, "sub_stations": {"Point A": {"inventory": 25, "rop": 15, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_pct": 94}}}
+        "RC100": {"sequence_order": 1, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 10}}},
+        "RA110": {"sequence_order": 2, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 21}}},
+        "RA120": {"sequence_order": 3, "sub_stations": {"Point A": {"inventory": 23, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_pct": 32}}},
+        "RA130": {"sequence_order": 4, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_pct": 43}}},
+        "RA140": {"sequence_order": 5, "sub_stations": {"Point A": {"inventory": 22, "rop": 10, "qty_per_pkg": 8,  "pkgs_per_trip": 4, "distance_pct": 54}}},
+        "RA150": {"sequence_order": 6, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_pct": 65}}},
+        "RA160": {"sequence_order": 7, "sub_stations": {"Point A": {"inventory": 26, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_pct": 76}}},
+        "RA170": {"sequence_order": 8, "sub_stations": {"Point A": {"inventory": 25, "rop": 15, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_pct": 88}}}
     }
     
     for ws_name, ws_data in st.session_state.workstations.items():
@@ -63,7 +64,7 @@ if selected_flat and selected_flat != "None":
     pt_ref = st.session_state.workstations[ws_target]["sub_stations"][sub_target]
     
     st.markdown(f"⚙️ **Editing:** `{ws_target}`")
-    st.session_state.workstations[ws_target]["sequence_order"] = st.sidebar.number_input("Sequence Processing Delay Rank:", min_value=1, value=int(st.session_state.workstations[ws_target]["sequence_order"]))
+    st.session_state.workstations[ws_target]["sequence_order"] = st.sidebar.number_input("Sequence Order Position:", min_value=1, value=int(st.session_state.workstations[ws_target]["sequence_order"]))
     pt_ref["inventory"] = st.sidebar.number_input("Live Stock Level (Units)", min_value=0, value=int(pt_ref["inventory"]))
     pt_ref["rop"] = st.sidebar.number_input("Reorder Threshold (ROP)", min_value=0, value=int(pt_ref["rop"]))
     pt_ref["qty_per_pkg"] = st.sidebar.number_input("Units Count Per Box", min_value=1, value=int(pt_ref["qty_per_pkg"]))
@@ -72,14 +73,14 @@ if selected_flat and selected_flat != "None":
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚡ Simulation Processing Engine")
-speed_acceleration = st.sidebar.slider("Simulation Processing Steps (s)", min_value=1, max_value=60, value=15)
+speed_acceleration = st.sidebar.slider("Simulation Processing Speed Steps (s)", min_value=1, max_value=60, value=15)
 
 # --- 4. ENGINE ADVANCEMENT PARSING PROCESS ---
 def advance_simulation(seconds):
     for _ in range(int(seconds)):
         st.session_state.sim_time += 1
         
-        # A. Takt Rate Processing Matrix
+        # A. Takt Rate Processing Matrix (Staggered based on actual assembly sequence order)
         for ws_name, ws_data in st.session_state.workstations.items():
             stagger_offset = (ws_data["sequence_order"] - 1) * master_takt_secs
             target_trigger_time = st.session_state.sim_time - stagger_offset
@@ -92,8 +93,8 @@ def advance_simulation(seconds):
                     else:
                         st.session_state.starvation_events[unique_key] += 1
 
-        # B. Round-Trip Dispatch Cycle Loop Pathing
-        if st.session_state.tugger_status == "Idle at Store":
+        # B. Circular Milk-Run Loop Dispatch Logic Engine (One-Way Continuous Path)
+        if st.session_state.tugger_status == "Idle at Supermarket":
             st.session_state.tugger_pct = 0.0
             highest_urgency = -9999
             chosen_ws, chosen_sub = None, None
@@ -111,20 +112,20 @@ def advance_simulation(seconds):
                 st.session_state.current_target_point = (chosen_ws, chosen_sub)
                 p_data = st.session_state.workstations[chosen_ws]["sub_stations"][chosen_sub]
                 st.session_state.active_delivery_qty = p_data["qty_per_pkg"] * p_data["pkgs_per_trip"]
-                st.session_state.tugger_status = f"Loading for {chosen_ws}"
+                st.session_state.tugger_status = f"Loading at Supermarket for {chosen_ws}"
                 st.session_state.trip_start_time = st.session_state.sim_time
                 st.session_state.process_timer = 20  
                 st.session_state.max_transit_secs = 20
                 
-        elif st.session_state.tugger_status.startswith("Loading for"):
+        elif st.session_state.tugger_status.startswith("Loading at Supermarket"):
             st.session_state.process_timer -= 1
             if st.session_state.process_timer <= 0:
                 w, s = st.session_state.current_target_point
-                st.session_state.tugger_status = f"Transit to {w}"
+                st.session_state.tugger_status = f"One-Way Loop Delivery to {w}"
                 st.session_state.process_timer = 45  
                 st.session_state.max_transit_secs = 45
                 
-        elif st.session_state.tugger_status.startswith("Transit to"):
+        elif st.session_state.tugger_status.startswith("One-Way Loop Delivery"):
             st.session_state.process_timer -= 1
             w, s = st.session_state.current_target_point
             max_pos = st.session_state.workstations[w]["sub_stations"][s]["distance_pct"]
@@ -145,27 +146,28 @@ def advance_simulation(seconds):
                     st.session_state.workstations[w]["sub_stations"][s]["inventory"] += st.session_state.active_delivery_qty
                 
                 st.session_state.trip_counter += 1
-                st.session_state.tugger_status = "Continuing Circle Loop to Store"
+                st.session_state.tugger_status = "Continuing Circular Loop back to Supermarket"
                 st.session_state.process_timer = 45
                 st.session_state.max_transit_secs = 45
                 
-        elif st.session_state.tugger_status == "Continuing Circle Loop to Store":
+        elif st.session_state.tugger_status == "Continuing Circular Loop back to Supermarket":
             st.session_state.process_timer -= 1
             w, s = st.session_state.current_target_point
             max_pos = st.session_state.workstations[w]["sub_stations"][s]["distance_pct"]
             elapsed = st.session_state.max_transit_secs - st.session_state.process_timer
             ratio = elapsed / st.session_state.max_transit_secs
+            # Vehicle keeps driving FORWARD (towards 100%) to complete the single-direction loop
             st.session_state.tugger_pct = max_pos + (ratio * (100.0 - max_pos))
             
             if st.session_state.process_timer <= 0:
                 duration_secs = st.session_state.sim_time - st.session_state.trip_start_time
                 st.session_state.trip_log.append({
                     "Trip ID": f"TRP-{st.session_state.trip_counter:03d}",
-                    "Target Workstation Node": w,
-                    "Payload Volume Refilled": f"{st.session_state.active_delivery_qty} units",
-                    "Total Route Cycle Time": format_to_mmss(duration_secs)
+                    "Target Station Node": w,
+                    "Payload Vol Refilled": f"{st.session_state.active_delivery_qty} units",
+                    "Total Circular Loop Duration": format_to_mmss(duration_secs)
                 })
-                st.session_state.tugger_status = "Idle at Store"
+                st.session_state.tugger_status = "Idle at Supermarket"
                 st.session_state.current_target_point = None
                 st.session_state.tugger_pct = 0.0
 
@@ -184,7 +186,7 @@ with c3:
     if st.button("🔄 Full Reset Plant State", use_container_width=True):
         st.session_state.sim_time = 0
         st.session_state.trip_log = []
-        st.session_state.tugger_status = "Idle at Store"
+        st.session_state.tugger_status = "Idle at Supermarket"
         st.session_state.current_target_point = None
         st.session_state.running = False
         st.session_state.tugger_pct = 0.0
@@ -194,7 +196,8 @@ with c3:
 
 # --- 6. VISUAL APP RENDER EXECUTION INTERFACE ---
 if app_mode == "🗺️ Live Simulation Map":
-    st.title("🗺️ Widescreen Factory Track Simulation Map")
+    st.title("🗺️ Closed-Loop Continuous Supply Track Map")
+    st.markdown("💡 **One-Way Operational Rules:** The Tugger train moves strictly in a continuous circle. It departs from the Supermarket staging zone, targets the critical station node, and then proceeds *forward* in the same direction to pull back into the Supermarket docking bay.")
     
     map_container_box = st.empty()
     status_msg_box = st.empty()
@@ -208,13 +211,11 @@ if app_mode == "🗺️ Live Simulation Map":
         point_markers = ""
         info_cards = ""
         
-        # Calculate structured display rows
         for ws_name, ws_data in st.session_state.workstations.items():
             for sub_name, d in ws_data["sub_stations"].items():
                 pos = d["distance_pct"]
                 is_active_target = (ws_name == tgt_ws)
                 
-                # Dynamic marker adjustments
                 is_targeted = "background: #fa5252; color: white; border: 3px solid #fff; box-shadow: 0 0 20px #fa5252; transform: translateX(-50%) scale(1.15);" if is_active_target else "background: #343a40; color: #f8f9fa; border: 1px solid #495057;"
                 unique_key = f"{ws_name}_{sub_name}"
                 
@@ -242,7 +243,7 @@ if app_mode == "🗺️ Live Simulation Map":
         if tgt_ws:
             is_returning = pct > st.session_state.workstations[tgt_ws]["sub_stations"]["Point A"]["distance_pct"]
             
-        tugger_label = "🚜 Circular Returning to Depot" if is_returning else (f"🚜 Hauling to {tgt_ws}" if tgt_ws else "🚜 Standby at Bay")
+        tugger_label = "🚜 Circular Returning to Base" if is_returning else (f"🚜 Advancing to {tgt_ws}" if tgt_ws else "🚜 Standby at Bay")
         color_class = "returning" if is_returning else ""
         top_tugger_tag = f'<div class="tugger-truck {color_class}" style="left: {pct}%;">{tugger_label}</div>' if tgt_ws or pct > 0 else ''
 
@@ -256,8 +257,10 @@ if app_mode == "🗺️ Live Simulation Map":
             .card-meta {{ font-size: 11px; color: #6c757d; line-height: 1.4; border-top: 1px solid #f1f3f5; padding-top: 4px; margin-top: 6px; }}
             
             .circle-loop-track {{ height: 45px; background: linear-gradient(180deg, #e9ecef 0%, #ced4da 100%); border-top: 4px dashed #868e96; border-bottom: 4px dashed #868e96; position: relative; margin: 90px 0; border-radius: 8px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }}
-            .depot-start-badge {{ position: absolute; left: 0%; top: -38px; background: #2b8a3e; color: white; padding: 6px 16px; border-radius: 20px; font-size: 11px; font-weight: bold; z-index: 15; transform: translateX(-50%); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
-            .depot-end-badge {{ position: absolute; left: 100%; top: -38px; background: #2b8a3e; color: white; padding: 6px 16px; border-radius: 20px; font-size: 11px; font-weight: bold; z-index: 15; transform: translateX(-50%); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+            
+            /* Combined Unified Start/End Hub representing the same physical location */
+            .supermarket-base-badge {{ position: absolute; left: 0%; top: -38px; background: #2b8a3e; color: white; padding: 6px 16px; border-radius: 20px; font-size: 11px; font-weight: bold; z-index: 15; transform: translateX(-50%); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+            .supermarket-return-badge {{ position: absolute; left: 100%; top: -38px; background: #2b8a3e; color: white; padding: 6px 16px; border-radius: 20px; font-size: 11px; font-weight: bold; z-index: 15; transform: translateX(-50%); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
             
             .station-node-pin {{ position: absolute; top: -38px; padding: 8px 14px; border-radius: 8px; z-index: 12; text-align: center; line-height: 1.3; box-shadow: 0 6px 12px rgba(0,0,0,0.08); transition: all 0.2s; min-width: 90px; transform: translateX(-50%); }}
             .badge-seq {{ background: rgba(0,0,0,0.1); padding: 1px 4px; border-radius: 3px; font-size: 9px; display: inline-block; margin-top: 3px; }}
@@ -268,15 +271,15 @@ if app_mode == "🗺️ Live Simulation Map":
         </style>
         <div class="floorplan-wrapper">
             <div class="supermarket-hub-banner">
-                🏪 Central Supermarket Storage Depot <span style="font-weight:normal; opacity:0.85; font-size:13px; margin-left:10px;">| Main Replenishment Base</span>
+                🏪 Unified Logistics Supermarket Hub (Start & Return Point)
             </div>
             
             <div style="position: relative; margin: 80px 40px; padding: 10px 0;">
                 <div class="circle-loop-track">
-                    <div class="depot-start-badge">🏁 DEPART HARBOR</div>
+                    <div class="supermarket-base-badge">🛫 DEPOT START</div>
                     {point_markers}
                     {top_tugger_tag}
-                    <div class="depot-end-badge">🔄 RETURN BAY</div>
+                    <div class="supermarket-return-badge">🛬 DEPOT RETURN</div>
                 </div>
             </div>
 
@@ -288,13 +291,13 @@ if app_mode == "🗺️ Live Simulation Map":
         while st.session_state.running:
             advance_simulation(speed_acceleration)
             map_container_box.html(generate_html_floorplan())
-            status_msg_box.info(f"🚜 **Logistics Status:** `{st.session_state.tugger_status}` (Next State Transition Countdown: `{st.session_state.process_timer}s`)")
+            status_msg_box.info(f"🚜 **Logistics Flow Monitor:** `{st.session_state.tugger_status}` (Next Event Countdown: `{st.session_state.process_timer}s`)")
             
             with kpi_metric_row.container():
                 m1, m2, m3 = st.columns(3)
                 m1.metric("⏱️ Operational Time Elapsed (MM:SS)", format_to_mmss(st.session_state.sim_time))
-                m2.metric("🚜 Completed Delivery Cycles", f"{st.session_state.trip_counter} Runs")
-                m3.metric("📦 Dispatched Payload Volume", f"{st.session_state.active_delivery_qty} units")
+                m2.metric("🚜 Completed Circular Supply Runs", f"{st.session_state.trip_counter} Loops")
+                m3.metric("📦 Active Replenishment Volume", f"{st.session_state.active_delivery_qty} units")
             
             time.sleep(0.04)
     else:
