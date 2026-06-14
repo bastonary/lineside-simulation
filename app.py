@@ -18,7 +18,7 @@ def parse_mmss_to_seconds(mmss_str):
     except:
         return 0
 
-# --- 2. INITIALIZE GLOBAL STATE ---
+# --- 2. INITIALIZE GLOBAL STATE WITH ACTUAL FACTORY SCALE ---
 SHIFT_MAX_SECONDS = 480 * 60  # 480 Minutes = 28,800 Seconds
 
 if "sim_time" not in st.session_state:
@@ -35,15 +35,15 @@ if "sim_time" not in st.session_state:
     st.session_state.active_delivery_qty = 0
     st.session_state.current_target_point = None
 
-    # Base Layout Configurations
+    # REAL Footprint Configurations (Max Route scaled to ~120m total loop run)
     st.session_state.workstations = {
-        "RA140": {"lane": "top",    "sequence_order": 4, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 150}}},
-        "RA130": {"lane": "top",    "sequence_order": 3, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 250}}},
-        "RA120": {"lane": "top",    "sequence_order": 2, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 350}}},
-        "RA110": {"lane": "top",    "sequence_order": 1, "sub_stations": {"Point A": {"inventory": 6,  "rop": 3,  "qty_per_pkg": 3,  "pkgs_per_trip": 1, "distance_meters": 450}}},
-        "RA170": {"lane": "bottom", "sequence_order": 5, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 600}}},
-        "RA160": {"lane": "bottom", "sequence_order": 6, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 720}}},
-        "RA150": {"lane": "bottom", "sequence_order": 7, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 840}}}
+        "RA140": {"lane": "top",    "sequence_order": 4, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 20}}},
+        "RA130": {"lane": "top",    "sequence_order": 3, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 30}}},
+        "RA120": {"lane": "top",    "sequence_order": 2, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 35}}},
+        "RA110": {"lane": "top",    "sequence_order": 1, "sub_stations": {"Point A": {"inventory": 6,  "rop": 3,  "qty_per_pkg": 3,  "pkgs_per_trip": 1, "distance_meters": 40}}},
+        "RA170": {"lane": "bottom", "sequence_order": 5, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 70}}},
+        "RA160": {"lane": "bottom", "sequence_order": 6, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 90}}},
+        "RA150": {"lane": "bottom", "sequence_order": 7, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 115}}} # Longest Route (~120m)
     }
     
     for ws_name, ws_data in st.session_state.workstations.items():
@@ -63,8 +63,14 @@ master_takt_mins = st.sidebar.number_input("Whole Line Master Takt (Minutes)", m
 master_takt_secs = int(master_takt_mins * 60)
 
 st.sidebar.header("🚜 Logistics Towing Properties")
-speed_kmh = st.sidebar.number_input("Tugger Travel Speed (km/h)", min_value=1.0, max_value=30.0, value=12.0, step=0.5)
+# Scaled to actual workshop floor speed (e.g., standard indoor tugger caution speed 3.5 km/h)
+speed_kmh = st.sidebar.number_input("Tugger Travel Speed (km/h)", min_value=0.5, max_value=20.0, value=3.5, step=0.1)
 speed_ms = (speed_kmh * 1000.0) / 3600.0
+
+st.sidebar.header("⏳ Process Handling Overhead Delays")
+# Fixed delays to account for human handling time, matching your 8-minute total cycle record
+staging_delay = st.sidebar.number_input("Store Staging/Loading Delay (Secs)", min_value=0, value=120)
+drop_delay = st.sidebar.number_input("Lineside Unloading Delay (Secs)", min_value=0, value=120)
 
 # --- DYNAMIC NODE ADDITION/REMOVAL ---
 st.sidebar.header("🛠️ Floorplan Modification Hub")
@@ -81,7 +87,7 @@ if mod_action == "Modify Station Data":
         st.markdown(f"⚙️ **Editing:** `{ws_target}`")
         st.session_state.workstations[ws_target]["sequence_order"] = st.sidebar.number_input("Production Start Seq Order:", min_value=1, max_value=20, value=int(st.session_state.workstations[ws_target]["sequence_order"]))
         st.session_state.workstations[ws_target]["lane"] = st.sidebar.selectbox("Visual Track Lane Line:", ["top", "bottom"], index=0 if st.session_state.workstations[ws_target]["lane"] == "top" else 1)
-        pt_ref["distance_meters"] = st.sidebar.number_input("Meter Distance from Start Hub:", min_value=10, max_value=990, value=int(pt_ref["distance_meters"]))
+        pt_ref["distance_meters"] = st.sidebar.number_input("Meter Distance from Start Hub:", min_value=5, max_value=200, value=int(pt_ref["distance_meters"]))
         pt_ref["inventory"] = st.sidebar.number_input("Live Stock Level (Units)", min_value=0, value=int(pt_ref["inventory"]))
         pt_ref["rop"] = st.sidebar.number_input("Reorder Threshold (ROP)", min_value=0, value=int(pt_ref["rop"]))
         pt_ref["qty_per_pkg"] = st.sidebar.number_input("Qty Per Package:", min_value=1, value=int(pt_ref["qty_per_pkg"]))
@@ -93,7 +99,7 @@ elif mod_action == "Add New Station/Drop Point":
     new_sub_name = st.sidebar.text_input("Sub-Station Drop Point Identifier:", "Point A")
     new_lane = st.sidebar.selectbox("Track Layout Lane Position:", ["top", "bottom"])
     new_seq = st.sidebar.number_input("Production Consumed Sequence Position:", min_value=1, value=5)
-    new_dist = st.sidebar.number_input("Route Distance from Hub (Meters):", min_value=10, max_value=990, value=500)
+    new_dist = st.sidebar.number_input("Route Distance from Hub (Meters):", min_value=5, max_value=200, value=60)
     
     new_stock = st.sidebar.number_input("Initial Live Stock:", min_value=0, value=24)
     new_rop = st.sidebar.number_input("Reorder Boundary Point (ROP):", min_value=0, value=12)
@@ -129,14 +135,13 @@ elif mod_action == "Remove Existing Node":
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚡ Simulation Engine Speed")
-speed_acceleration = st.sidebar.slider("Speed Steps (seconds/frame)", min_value=1, max_value=60, value=15)
+speed_acceleration = st.sidebar.slider("Speed Steps (seconds/frame)", min_value=1, max_value=120, value=30)
 
-# --- 4. ENGINE RUNTIME LOGIC (WITH 480-MIN HARD CEILING LIMIT) ---
+# --- 4. ENGINE RUNTIME LOGIC (SCALED TO ACTUAL 120M FOOTPRINT) ---
 def advance_simulation(seconds):
-    total_loop_meters = 1000.0
+    total_loop_meters = 120.0  # Actual Maximum Track footprint
     
     for _ in range(int(seconds)):
-        # Check boundary condition before adding seconds
         if st.session_state.sim_time >= SHIFT_MAX_SECONDS:
             st.session_state.running = False
             break
@@ -156,7 +161,7 @@ def advance_simulation(seconds):
                     else:
                         st.session_state.starvation_events[unique_key] += 1
 
-        # B. Loop-Driven Physics Movement Logic
+        # B. Real Scaled Physics Movement Logic
         if st.session_state.tugger_status == "Idle at Start Hub":
             st.session_state.tugger_pct = 0.0
             highest_urgency = -9999
@@ -178,8 +183,8 @@ def advance_simulation(seconds):
                 
                 st.session_state.tugger_status = f"Staging Cargo for {chosen_ws}"
                 st.session_state.trip_start_time = st.session_state.sim_time
-                st.session_state.process_timer = 15  
-                st.session_state.max_transit_secs = 15
+                st.session_state.process_timer = staging_delay  
+                st.session_state.max_transit_secs = max(1, staging_delay)
                 
         elif st.session_state.tugger_status.startswith("Staging Cargo"):
             st.session_state.process_timer -= 1
@@ -214,8 +219,8 @@ def advance_simulation(seconds):
             if st.session_state.process_timer <= 0:
                 st.session_state.tugger_pct = (target_distance / total_loop_meters) * 100.0  
                 st.session_state.tugger_status = f"Dropping at {w}"
-                st.session_state.process_timer = 20  
-                st.session_state.max_transit_secs = 20
+                st.session_state.process_timer = drop_delay  
+                st.session_state.max_transit_secs = max(1, drop_delay)
                 
         elif st.session_state.tugger_status.startswith("Dropping at"):
             st.session_state.process_timer -= 1
@@ -296,7 +301,6 @@ with c3:
 if app_mode == "🗺️ Live Simulation Map":
     st.title("🗺️ Factory Circular Flow Tracker")
     
-    # Progress tracker bar for shift runtime visualizer
     shift_progress_ratio = min(1.0, float(st.session_state.sim_time) / SHIFT_MAX_SECONDS)
     st.progress(shift_progress_ratio, text=f"⏱️ Shift Execution Timeline Status: {format_to_mmss(st.session_state.sim_time)} / 480:00 Mins")
     
@@ -322,18 +326,18 @@ if app_mode == "🗺️ Live Simulation Map":
                 is_targeted = "background: #fa5252; color: white; border: 2px solid #fff; box-shadow: 0 0 12px #fa5252; transform: translate(-50%, -50%) scale(1.05);" if is_active_target else "background: #343a40; color: #f8f9fa; border: 1px solid #495057; transform: translate(-50%, -50%);"
                 unique_key = f"{ws_name}_{sub_name}"
                 
+                # Proportional x placement matching actual 120m bounds
                 if ws_data["lane"] == "top":
-                    x_pos = 20.0 + ((m_range - 100.0) / 400.0) * 65.0
+                    x_pos = 20.0 + ((m_range - 10.0) / 50.0) * 65.0
                     y_pos = 20.0
                 else:
-                    x_pos = 85.0 - ((m_range - 550.0) / 350.0) * 65.0
+                    x_pos = 85.0 - ((m_range - 60.0) / 60.0) * 65.0
                     y_pos = 80.0
 
                 station_markers += f"""
                 <div class="station-node-pin" style="left: {x_pos}%; top: {y_pos}%; {is_targeted}">
                     <div style="font-weight: bold; font-size: 11px;">{ws_name}</div>
                     <div style="font-size: 9px; opacity: 0.8;">{int(m_range)}m</div>
-                    <div style="font-size: 8px; color: #5c7cfa;">Seq #{ws_data['sequence_order']}</div>
                 </div>
                 """
                 
@@ -345,7 +349,7 @@ if app_mode == "🗺️ Live Simulation Map":
                     <div class="card-stock">📦 {d['inventory']} <span style="font-size:11px; color:#495057;">u</span></div>
                     <div class="card-meta">
                         Pack size: <b>{d['qty_per_pkg']}u x {d['pkgs_per_trip']}</b><br>
-                        ROP: <b>{d['rop']} u</b> | Seq: <b>#{ws_data['sequence_order']}</b><br>
+                        ROP: <b>{d['rop']} u</b><br>
                         Shortage: <span style="color:#fa5252; font-weight:bold;">{format_to_mmss(shortage_val)}</span>
                     </div>
                 </div>
@@ -381,7 +385,7 @@ if app_mode == "🗺️ Live Simulation Map":
         </style>
         <div class="floorplan-wrapper">
             <div class="loop-track-container">
-                <div class="hub-terminal">🏁 START /<br>RETURN</div>
+                <div class="hub-terminal">🏁 STORE<br>HUB</div>
                 {station_markers}
                 {car_html}
             </div>
@@ -394,7 +398,7 @@ if app_mode == "🗺️ Live Simulation Map":
             advance_simulation(speed_acceleration)
             map_container_box.html(generate_html_floorplan())
             
-            status_msg_box.info(f"🚜 **Tugger Fleet Dispatch Status:** `{st.session_state.tugger_status}` (Remaining: `{st.session_state.process_timer}s` | Active Track Coordinate: `{int(st.session_state.tugger_pct * 10)}m`)")
+            status_msg_box.info(f"🚜 **Tugger Fleet Dispatch Status:** `{st.session_state.tugger_status}` (Remaining: `{st.session_state.process_timer}s`)")
             
             with kpi_metric_row.container():
                 m1, m2, m3 = st.columns(3)
@@ -412,20 +416,16 @@ if app_mode == "🗺️ Live Simulation Map":
         else:
             status_msg_box.info(f"⏸️ **Simulation Paused:** `{st.session_state.tugger_status}`")
 
-# --- 7. ANALYSIS PAGE WITH LIVE TUGGER ROUND ANALYSIS ---
+# --- 7. ANALYSIS PAGE ---
 elif app_mode == "📊 Lineside Stock & Refill Analysis":
     st.title("📊 Lineside Stock & Tugger Logistics Performance")
     
-    # NEW BLOCK: TUGGER SPEED / DISPATCH TIME ANALYTICS SECTION
     st.header("🚜 Logistics Tugger Round Analytics")
     
     if not st.session_state.trip_log:
         st.info("No logistics cycles logged yet. Run simulation to review trip duration performance metrics.")
     else:
-        # Calculate real mathematical metrics across logged trips
         df_trips = pd.DataFrame(st.session_state.trip_log)
-        
-        # Convert MM:SS loop duration records back into absolute seconds to get accurate performance stats
         df_trips["duration_secs"] = df_trips["Total Cycle Duration"].apply(parse_mmss_to_seconds)
         
         avg_secs = df_trips["duration_secs"].mean()
@@ -438,9 +438,8 @@ elif app_mode == "📊 Lineside Stock & Refill Analysis":
         t_col3.metric("🐌 Longest Round Transit", format_to_mmss(max_secs))
         t_col4.metric("📈 Total Round Dispatches", f"{len(df_trips)} Runs")
         
-        # Mini bar breakdown visualization of the logistics workload distribution
         with st.container(border=True):
-            st.markdown("**📊 Loop Duration Spectrum by Target Workstation Location**")
+            st.markdown("**📊 Loop Duration Spectrum by Target Workstation Location (Seconds)**")
             chart_data_trips = df_trips[["Target Node", "duration_secs"]].copy()
             chart_data_trips = chart_data_trips.rename(columns={"duration_secs": "Round Time Duration (Seconds)"})
             st.bar_chart(chart_data_trips, x="Target Node", y="Round Time Duration (Seconds)", height=200)
@@ -472,7 +471,7 @@ elif app_mode == "📊 Lineside Stock & Refill Analysis":
                 status_label = "🚨 STARVED (Line Stopped)"
                 color_theme = "red"
             elif current_stock <= rop_value:
-                status_label = "⚠️ BELOW REORDER POINT (Refill Triggered)"
+                status_label = "⚠️ BELOW REORDER POINT"
                 color_theme = "orange"
             else:
                 status_label = "✅ HEALTHY BUFFER"
@@ -495,7 +494,7 @@ elif app_mode == "📊 Lineside Stock & Refill Analysis":
                     
                     starve_time = st.session_state.starvation_events.get(col_name, 0)
                     st.caption(f"⏱️ Accumulative Starvation Time: **{format_to_mmss(starve_time)}**")
-                    st.caption(f"🏁 Route Loop Index: **{int(pt_data['distance_meters'])}m** | Sequence: **#{ws_d['sequence_order']}**")
+                    st.caption(f"🏁 Route Loop Index: **{int(pt_data['distance_meters'])}m**")
                 
                 with col_right:
                     chart_slice = st.session_state.chart_data[col_name].iloc[-300:]
