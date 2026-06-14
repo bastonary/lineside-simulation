@@ -11,7 +11,7 @@ def format_to_mmss(total_seconds):
     seconds = int(total_seconds) % 60
     return f"{minutes:02d}:{seconds:02d}"
 
-# --- 2. INITIALIZE GLOBAL STATE WITH CUSTOM TARGET VALUES ---
+# --- 2. INITIALIZE GLOBAL STATE ---
 if "sim_time" not in st.session_state:
     st.session_state.sim_time = 0          
     st.session_state.trip_log = []         
@@ -27,7 +27,6 @@ if "sim_time" not in st.session_state:
     st.session_state.current_target_point = None
 
     # Base Layout Configurations
-    # RA110 has your specialized lower quantities; all others default to Stock=24, ROP=12, Qty/Pkg=12, Pkgs/Trip=1
     st.session_state.workstations = {
         "RA140": {"lane": "top",    "sequence_order": 4, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 150}}},
         "RA130": {"lane": "top",    "sequence_order": 3, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 1, "distance_meters": 250}}},
@@ -48,7 +47,7 @@ if "sim_time" not in st.session_state:
 
 # --- 3. SIDEBAR CONTROLS ---
 st.sidebar.title("🎮 Factory Control Room")
-app_mode = st.sidebar.selectbox("📂 Select Dashboard Page", ["🗺️ Live Simulation Map", "📊 Isolated Shortage Analytics"])
+app_mode = st.sidebar.selectbox("📂 Select Dashboard Page", ["🗺️ Live Simulation Map", "📊 Lineside Stock & Refill Analysis"])
 
 st.sidebar.header("⚙️ Master Line Rate Settings")
 master_takt_mins = st.sidebar.number_input("Whole Line Master Takt (Minutes)", min_value=1.0, value=8.0, step=0.5)
@@ -58,7 +57,7 @@ st.sidebar.header("🚜 Logistics Towing Properties")
 speed_kmh = st.sidebar.number_input("Tugger Travel Speed (km/h)", min_value=1.0, max_value=30.0, value=12.0, step=0.5)
 speed_ms = (speed_kmh * 1000.0) / 3600.0
 
-# --- 3.1 DYNAMIC NODE ADDITION/REMOVAL MANAGEMENT TOOLKIT ---
+# --- DYNAMIC NODE ADDITION/REMOVAL ---
 st.sidebar.header("🛠️ Floorplan Modification Hub")
 mod_action = st.sidebar.selectbox("Choose Structural Action:", ["Modify Station Data", "Add New Station/Drop Point", "Remove Existing Node"])
 
@@ -130,7 +129,7 @@ def advance_simulation(seconds):
     for _ in range(int(seconds)):
         st.session_state.sim_time += 1
         
-        # A. Production Stock Depletion (Based on sequence configurations)
+        # A. Production Stock Depletion
         for ws_name, ws_data in list(st.session_state.workstations.items()):
             stagger_offset = (ws_data["sequence_order"] - 1) * master_takt_secs
             target_trigger_time = st.session_state.sim_time - stagger_offset
@@ -278,7 +277,7 @@ with c3:
             st.session_state.starvation_events[p] = 0
         st.rerun()
 
-# --- 6. USER INTERFACE PAGE RENDER ---
+# --- 6. USER INTERFACE PAGES ---
 if app_mode == "🗺️ Live Simulation Map":
     st.title("🗺️ Factory Circular Flow Tracker")
     
@@ -352,12 +351,9 @@ if app_mode == "🗺️ Live Simulation Map":
             .card-title {{ font-weight: bold; font-size: 13px; color: #212529; }}
             .card-stock {{ font-size: 18px; font-weight: 800; color: #1c7ed6; margin: 2px 0; }}
             .card-meta {{ font-size: 10.5px; color: #6c757d; border-top: 1px solid #f1f3f5; padding-top: 4px; margin-top: 4px; line-height: 1.4; }}
-            
             .loop-track-container {{ height: 140px; border: 4px solid #e03131; border-radius: 70px; position: relative; margin: 20px 10px; background: #ffffff; }}
-            
             .hub-terminal {{ position: absolute; left: 5%; top: 50%; transform: translate(-50%, -50%); background: #1c7ed6; color: white; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; z-index: 16; text-align: center; line-height: 1.2; box-shadow: 0 3px 6px rgba(0,0,0,0.1); }}
             .station-node-pin {{ position: absolute; padding: 4px 8px; border-radius: 4px; z-index: 12; text-align: center; min-width: 60px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); transition: all 0.1s linear; }}
-            
             .tugger-truck {{ position: absolute; background: #2b8a3e; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; z-index: 20; white-space: nowrap; border: 1px solid #fff; box-shadow: 0 3px 8px rgba(43,138,62,0.3); }}
             .tugger-truck.returning {{ background: #e03131; box-shadow: 0 3px 8px rgba(224,49,49,0.3); }}
         </style>
@@ -389,14 +385,15 @@ if app_mode == "🗺️ Live Simulation Map":
         map_container_box.html(generate_html_floorplan())
         status_msg_box.info(f"⏸️ **Simulation Paused:** `{st.session_state.tugger_status}`")
 
-# --- 7. SANITIZED BOTTLENECK SHORTAGE ANALYTICS PAGE ---
-elif app_mode == "📊 Isolated Shortage Analytics":
-    st.title("📊 Sub-Station Isolated Bottleneck Analysis Dashboard")
+# --- 7. REVISED ANALYSIS PAGE: LINESIDE STOCK TRACKING ---
+elif app_mode == "📊 Isolated Shortage Analytics" or app_mode == "📊 Lineside Stock & Refill Analysis":
+    st.title("📊 Lineside Stock Trajectory & Refill Performance")
+    st.markdown("This dashboard tracks how line production consumes material (downward steps) and how the tugger refills it (vertical jumps).")
     
     active_cols = [c for c in st.session_state.chart_data.columns if "_" in str(c)]
     
     if not active_cols:
-        st.warning("No drop sub-station locations logged yet.")
+        st.warning("No drop sub-station metrics logged yet. Please start the simulation run first.")
     else:
         for col_name in active_cols:
             try:
@@ -404,22 +401,53 @@ elif app_mode == "📊 Isolated Shortage Analytics":
             except ValueError:
                 continue 
                 
+            ws_d = st.session_state.workstations.get(ws_part, {})
+            if not ws_d or sub_part not in ws_d["sub_stations"]:
+                continue
+                
+            pt_data = ws_d["sub_stations"][sub_part]
+            current_stock = pt_data["inventory"]
+            rop_value = pt_data["rop"]
+            refill_qty = pt_data["qty_per_pkg"] * pt_data["pkgs_per_trip"]
+            
+            # Determine status context color formatting
+            if current_stock == 0:
+                status_label = "🚨 STARVED (Line Stopped)"
+                color_theme = "red"
+            elif current_stock <= rop_value:
+                status_label = "⚠️ BELOW REORDER POINT (Refill Triggered)"
+                color_theme = "orange"
+            else:
+                status_label = "✅ HEALTHY BUFFER"
+                color_theme = "green"
+                
             with st.container(border=True):
-                c_left, c_right = st.columns([1, 4])
-                with c_left:
-                    st.subheader(f"📍 {ws_part}")
-                    st.caption(f"Sub-Station: **{sub_part}**")
+                # Layout Split: Left details & live levels, Right full history timeline graph
+                col_left, col_right = st.columns([2, 5])
+                
+                with col_left:
+                    st.subheader(f"📍 Station {ws_part}")
+                    st.markdown(f"Status: :{color_theme}[**{status_label}**]")
                     
-                    shortage_duration_secs = st.session_state.starvation_events.get(col_name, 0)
-                    st.metric("🚨 Total Starvation Time", format_to_mmss(shortage_duration_secs))
+                    # Custom progress metric display representing physical shelf status
+                    max_capacity_est = max(30, rop_value + refill_qty)
+                    progress_pct = min(1.0, float(current_stock) / max_capacity_est)
+                    st.progress(progress_pct, text=f"Shelf Load Level: {current_stock} / {max_capacity_est} Units")
                     
-                    ws_d = st.session_state.workstations.get(ws_part, {})
-                    if ws_d and sub_part in ws_d["sub_stations"]:
-                        st.caption(f"**Loop Range Location:** {int(ws_d['sub_stations'][sub_part]['distance_meters'])} meters")
-                        st.caption(f"**Prod Sequence:** Row Line #{ws_d['sequence_order']}")
-                with c_right:
-                    if col_name in st.session_state.chart_data.columns:
-                        st.line_chart(st.session_state.chart_data[col_name].iloc[-400:], height=150)
+                    # Detail specs
+                    m1, m2 = st.columns(2)
+                    m1.metric("📉 Reorder Point (ROP)", f"{rop_value} u")
+                    m2.metric("🚛 Refill Drop Volume", f"+{refill_qty} u")
+                    
+                    starve_time = st.session_state.starvation_events.get(col_name, 0)
+                    st.caption(f"⏱️ Accumulative Starvation Time: **{format_to_mmss(starve_time)}**")
+                    st.caption(f"🏁 Route Loop Index: **{int(pt_data['distance_meters'])}m** | Sequence: **#{ws_d['sequence_order']}**")
+                
+                with col_right:
+                    st.markdown("**📉 Production Consumption & Refill Sawtooth Graph**")
+                    # Slice trailing history frames for a cleaner view
+                    chart_slice = st.session_state.chart_data[col_name].iloc[-300:]
+                    st.line_chart(chart_slice, height=180)
         
         st.markdown("---")
         st.subheader("📋 Historical Trip Logs Ledger")
