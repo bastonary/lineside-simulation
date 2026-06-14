@@ -5,13 +5,22 @@ import time
 
 st.set_page_config(layout="wide")
 
-# --- 1. CLOCK FORMATTING HELPER ---
+# --- 1. CLOCK FORMATTING HELPERS ---
 def format_to_mmss(total_seconds):
     minutes = int(total_seconds) // 60
     seconds = int(total_seconds) % 60
     return f"{minutes:02d}:{seconds:02d}"
 
+def parse_mmss_to_seconds(mmss_str):
+    try:
+        parts = mmss_str.split(":")
+        return int(parts[0]) * 60 + int(parts[1])
+    except:
+        return 0
+
 # --- 2. INITIALIZE GLOBAL STATE ---
+SHIFT_MAX_SECONDS = 480 * 60  # 480 Minutes = 28,800 Seconds
+
 if "sim_time" not in st.session_state:
     st.session_state.sim_time = 0          
     st.session_state.trip_log = []         
@@ -71,7 +80,7 @@ if mod_action == "Modify Station Data":
         
         st.markdown(f"⚙️ **Editing:** `{ws_target}`")
         st.session_state.workstations[ws_target]["sequence_order"] = st.sidebar.number_input("Production Start Seq Order:", min_value=1, max_value=20, value=int(st.session_state.workstations[ws_target]["sequence_order"]))
-        st.session_state.workstations[ws_target]["lane"] = st.sidebar.selectbox("Visual Track Track Lane:", ["top", "bottom"], index=0 if st.session_state.workstations[ws_target]["lane"] == "top" else 1)
+        st.session_state.workstations[ws_target]["lane"] = st.sidebar.selectbox("Visual Track Lane Line:", ["top", "bottom"], index=0 if st.session_state.workstations[ws_target]["lane"] == "top" else 1)
         pt_ref["distance_meters"] = st.sidebar.number_input("Meter Distance from Start Hub:", min_value=10, max_value=990, value=int(pt_ref["distance_meters"]))
         pt_ref["inventory"] = st.sidebar.number_input("Live Stock Level (Units)", min_value=0, value=int(pt_ref["inventory"]))
         pt_ref["rop"] = st.sidebar.number_input("Reorder Threshold (ROP)", min_value=0, value=int(pt_ref["rop"]))
@@ -122,11 +131,16 @@ st.sidebar.markdown("---")
 st.sidebar.header("⚡ Simulation Engine Speed")
 speed_acceleration = st.sidebar.slider("Speed Steps (seconds/frame)", min_value=1, max_value=60, value=15)
 
-# --- 4. ENGINE RUNTIME LOGIC ---
+# --- 4. ENGINE RUNTIME LOGIC (WITH 480-MIN HARD CEILING LIMIT) ---
 def advance_simulation(seconds):
     total_loop_meters = 1000.0
     
     for _ in range(int(seconds)):
+        # Check boundary condition before adding seconds
+        if st.session_state.sim_time >= SHIFT_MAX_SECONDS:
+            st.session_state.running = False
+            break
+            
         st.session_state.sim_time += 1
         
         # A. Production Stock Depletion
@@ -260,7 +274,8 @@ def advance_simulation(seconds):
 # --- 5. SYSTEM COMMANDS TOOLBAR ---
 c1, c2, c3 = st.columns(3)
 with c1:
-    if st.button("▶️ Start Simulation Run", use_container_width=True):
+    is_shift_done = (st.session_state.sim_time >= SHIFT_MAX_SECONDS)
+    if st.button("▶️ Start Simulation Run", use_container_width=True, disabled=is_shift_done):
         st.session_state.running = True
 with c2:
     if st.button("⏸️ Pause Engine", use_container_width=True):
@@ -281,6 +296,13 @@ with c3:
 if app_mode == "🗺️ Live Simulation Map":
     st.title("🗺️ Factory Circular Flow Tracker")
     
+    # Progress tracker bar for shift runtime visualizer
+    shift_progress_ratio = min(1.0, float(st.session_state.sim_time) / SHIFT_MAX_SECONDS)
+    st.progress(shift_progress_ratio, text=f"⏱️ Shift Execution Timeline Status: {format_to_mmss(st.session_state.sim_time)} / 480:00 Mins")
+    
+    if is_shift_done:
+        st.success("🏁 **Shift Execution Finished:** Target window limit of 480 Minutes achieved. Engine locked.")
+        
     map_container_box = st.empty()
     status_msg_box = st.empty()
     kpi_metric_row = st.empty()
@@ -381,19 +403,55 @@ if app_mode == "🗺️ Live Simulation Map":
                 m3.metric("📦 Car Active Payload Volume", f"{st.session_state.active_delivery_qty} units")
             
             time.sleep(0.04)
+            if st.session_state.sim_time >= SHIFT_MAX_SECONDS:
+                st.rerun()
     else:
         map_container_box.html(generate_html_floorplan())
-        status_msg_box.info(f"⏸️ **Simulation Paused:** `{st.session_state.tugger_status}`")
+        if is_shift_done:
+            status_msg_box.success("🏁 Shift cycle fully executed (480 Mins Complete).")
+        else:
+            status_msg_box.info(f"⏸️ **Simulation Paused:** `{st.session_state.tugger_status}`")
 
-# --- 7. REVISED ANALYSIS PAGE: LINESIDE STOCK TRACKING ---
-elif app_mode == "📊 Isolated Shortage Analytics" or app_mode == "📊 Lineside Stock & Refill Analysis":
-    st.title("📊 Lineside Stock Trajectory & Refill Performance")
-    st.markdown("This dashboard tracks how line production consumes material (downward steps) and how the tugger refills it (vertical jumps).")
+# --- 7. ANALYSIS PAGE WITH LIVE TUGGER ROUND ANALYSIS ---
+elif app_mode == "📊 Lineside Stock & Refill Analysis":
+    st.title("📊 Lineside Stock & Tugger Logistics Performance")
+    
+    # NEW BLOCK: TUGGER SPEED / DISPATCH TIME ANALYTICS SECTION
+    st.header("🚜 Logistics Tugger Round Analytics")
+    
+    if not st.session_state.trip_log:
+        st.info("No logistics cycles logged yet. Run simulation to review trip duration performance metrics.")
+    else:
+        # Calculate real mathematical metrics across logged trips
+        df_trips = pd.DataFrame(st.session_state.trip_log)
+        
+        # Convert MM:SS loop duration records back into absolute seconds to get accurate performance stats
+        df_trips["duration_secs"] = df_trips["Total Cycle Duration"].apply(parse_mmss_to_seconds)
+        
+        avg_secs = df_trips["duration_secs"].mean()
+        min_secs = df_trips["duration_secs"].min()
+        max_secs = df_trips["duration_secs"].max()
+        
+        t_col1, t_col2, t_col3, t_col4 = st.columns(4)
+        t_col1.metric("⏱️ Avg Round Duration", format_to_mmss(avg_secs))
+        t_col2.metric("⚡ Fastest Round Sprint", format_to_mmss(min_secs))
+        t_col3.metric("🐌 Longest Round Transit", format_to_mmss(max_secs))
+        t_col4.metric("📈 Total Round Dispatches", f"{len(df_trips)} Runs")
+        
+        # Mini bar breakdown visualization of the logistics workload distribution
+        with st.container(border=True):
+            st.markdown("**📊 Loop Duration Spectrum by Target Workstation Location**")
+            chart_data_trips = df_trips[["Target Node", "duration_secs"]].copy()
+            chart_data_trips = chart_data_trips.rename(columns={"duration_secs": "Round Time Duration (Seconds)"})
+            st.bar_chart(chart_data_trips, x="Target Node", y="Round Time Duration (Seconds)", height=200)
+
+    st.markdown("---")
+    st.header("📉 Individual Sub-Station Shelf Buffer Profiles")
     
     active_cols = [c for c in st.session_state.chart_data.columns if "_" in str(c)]
     
     if not active_cols:
-        st.warning("No drop sub-station metrics logged yet. Please start the simulation run first.")
+        st.warning("No drop metrics tracked yet.")
     else:
         for col_name in active_cols:
             try:
@@ -410,7 +468,6 @@ elif app_mode == "📊 Isolated Shortage Analytics" or app_mode == "📊 Linesid
             rop_value = pt_data["rop"]
             refill_qty = pt_data["qty_per_pkg"] * pt_data["pkgs_per_trip"]
             
-            # Determine status context color formatting
             if current_stock == 0:
                 status_label = "🚨 STARVED (Line Stopped)"
                 color_theme = "red"
@@ -422,19 +479,16 @@ elif app_mode == "📊 Isolated Shortage Analytics" or app_mode == "📊 Linesid
                 color_theme = "green"
                 
             with st.container(border=True):
-                # Layout Split: Left details & live levels, Right full history timeline graph
                 col_left, col_right = st.columns([2, 5])
                 
                 with col_left:
                     st.subheader(f"📍 Station {ws_part}")
                     st.markdown(f"Status: :{color_theme}[**{status_label}**]")
                     
-                    # Custom progress metric display representing physical shelf status
                     max_capacity_est = max(30, rop_value + refill_qty)
                     progress_pct = min(1.0, float(current_stock) / max_capacity_est)
                     st.progress(progress_pct, text=f"Shelf Load Level: {current_stock} / {max_capacity_est} Units")
                     
-                    # Detail specs
                     m1, m2 = st.columns(2)
                     m1.metric("📉 Reorder Point (ROP)", f"{rop_value} u")
                     m2.metric("🚛 Refill Drop Volume", f"+{refill_qty} u")
@@ -444,14 +498,9 @@ elif app_mode == "📊 Isolated Shortage Analytics" or app_mode == "📊 Linesid
                     st.caption(f"🏁 Route Loop Index: **{int(pt_data['distance_meters'])}m** | Sequence: **#{ws_d['sequence_order']}**")
                 
                 with col_right:
-                    st.markdown("**📉 Production Consumption & Refill Sawtooth Graph**")
-                    # Slice trailing history frames for a cleaner view
                     chart_slice = st.session_state.chart_data[col_name].iloc[-300:]
                     st.line_chart(chart_slice, height=180)
         
         st.markdown("---")
         st.subheader("📋 Historical Trip Logs Ledger")
-        if not st.session_state.trip_log:
-            st.info("No distribution cycles completed yet.")
-        else:
-            st.dataframe(pd.DataFrame(st.session_state.trip_log), use_container_width=True)
+        st.dataframe(pd.DataFrame(st.session_state.trip_log), use_container_width=True)
