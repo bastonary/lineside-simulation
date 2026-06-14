@@ -11,7 +11,7 @@ def format_to_mmss(total_seconds):
     seconds = int(total_seconds) % 60
     return f"{minutes:02d}:{seconds:02d}"
 
-# --- 2. INITIALIZE GLOBAL STATE WITH YOUR EXACT LOOP GEOMETRY ---
+# --- 2. INITIALIZE GLOBAL STATE WITH OVAL LOOP GEOMETRY ---
 if "sim_time" not in st.session_state:
     st.session_state.sim_time = 0          
     st.session_state.trip_log = []         
@@ -26,8 +26,8 @@ if "sim_time" not in st.session_state:
     st.session_state.active_delivery_qty = 0
     st.session_state.current_target_point = None
 
-    # Track sequence and distances mapped progressively along a 1000m continuous oval loop
-    # Top track: 0m -> 500m | Right Turnaround: 500m | Bottom track: 500m -> 1000m (returning left)
+    # Progressive distance metrics over a 1000m continuous loop circuit
+    # Top track: 0m -> 500m (Left to Right) | Bottom track: 500m -> 1000m (Right to Left)
     st.session_state.workstations = {
         "RA140": {"lane": "top",    "sequence_order": 1, "sub_stations": {"Point A": {"inventory": 22, "rop": 10, "qty_per_pkg": 8,  "pkgs_per_trip": 4, "distance_meters": 150}}},
         "RA130": {"lane": "top",    "sequence_order": 2, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_meters": 250}}},
@@ -212,7 +212,7 @@ with c3:
             st.session_state.starvation_events[p] = 0
         st.rerun()
 
-# --- 6. USER INTERFACE MAP RENDER ---
+# --- 6. USER INTERFACE PAGE RENDER ---
 if app_mode == "🗺️ Live Simulation Map":
     st.title("🗺️ Factory Circular Flow Tracker")
     
@@ -228,7 +228,6 @@ if app_mode == "🗺️ Live Simulation Map":
         station_markers = ""
         info_cards = ""
         
-        # Plot each station layout position cleanly along the loop coordinates
         for ws_name, ws_data in st.session_state.workstations.items():
             for sub_name, d in ws_data["sub_stations"].items():
                 m_range = d["distance_meters"]
@@ -236,13 +235,11 @@ if app_mode == "🗺️ Live Simulation Map":
                 is_targeted = "background: #fa5252; color: white; border: 2px solid #fff; box-shadow: 0 0 12px #fa5252; transform: translate(-50%, -50%) scale(1.05);" if is_active_target else "background: #343a40; color: #f8f9fa; border: 1px solid #495057; transform: translate(-50%, -50%);"
                 unique_key = f"{ws_name}_{sub_name}"
                 
-                # Dynamic visual coordination matching the provided loop map image
+                # Top lane goes Left -> Right. Bottom lane goes Right -> Left.
                 if ws_data["lane"] == "top":
-                    # Upper track row: Left-to-right alignment (150m to 450m maps onto 25% to 85% width)
                     x_pos = 20.0 + ((m_range - 100.0) / 400.0) * 65.0
                     y_pos = 20.0
                 else:
-                    # Lower track row: Right-to-left alignment (600m to 840m maps onto 85% to 25% width)
                     x_pos = 85.0 - ((m_range - 550.0) / 350.0) * 65.0
                     y_pos = 80.0
 
@@ -265,17 +262,14 @@ if app_mode == "🗺️ Live Simulation Map":
                 </div>
                 """
                 
-        # Handle custom single-car coordinate path mapping
         car_html = ""
         if pct > 0:
             if pct <= 50.0:
-                # Top side heading east
                 cx = 5.0 + (pct / 50.0) * 80.0
                 cy = 20.0
                 lbl = "🚜 Transit"
                 c_class = ""
             else:
-                # Bottom side heading west back to terminal
                 cx = 85.0 - ((pct - 50.0) / 50.0) * 80.0
                 cy = 80.0
                 lbl = "🚜 Return"
@@ -291,8 +285,7 @@ if app_mode == "🗺️ Live Simulation Map":
             .card-stock {{ font-size: 18px; font-weight: 800; color: #1c7ed6; margin: 2px 0; }}
             .card-meta {{ font-size: 11px; color: #6c757d; border-top: 1px solid #f1f3f5; padding-top: 4px; margin-top: 4px; line-height: 1.3; }}
             
-            /* Clean Compact Circular Loop Visual Track Box */
-            .loop-track-container {{ height: 140px; border: 4px dashed #ced4da; border-radius: 70px; position: relative; margin: 20px 10px; background: #ffffff; box-shadow: inset 0 0 10px rgba(0,0,0,0.02); }}
+            .loop-track-container {{ height: 140px; border: 4px solid #e03131; border-radius: 70px; position: relative; margin: 20px 10px; background: #ffffff; }}
             
             .hub-terminal {{ position: absolute; left: 5%; top: 50%; transform: translate(-50%, -50%); background: #1c7ed6; color: white; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; z-index: 16; text-align: center; line-height: 1.2; box-shadow: 0 3px 6px rgba(0,0,0,0.1); }}
             .station-node-pin {{ position: absolute; padding: 4px 8px; border-radius: 4px; z-index: 12; text-align: center; min-width: 60px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); transition: all 0.1s linear; }}
@@ -301,13 +294,11 @@ if app_mode == "🗺️ Live Simulation Map":
             .tugger-truck.returning {{ background: #e03131; box-shadow: 0 3px 8px rgba(224,49,49,0.3); }}
         </style>
         <div class="floorplan-wrapper">
-            
             <div class="loop-track-container">
                 <div class="hub-terminal">🏁 START /<br>RETURN</div>
                 {station_markers}
                 {car_html}
             </div>
-
             <div class="cards-outer-container">{info_cards}</div>
         </div>
         """
@@ -330,21 +321,32 @@ if app_mode == "🗺️ Live Simulation Map":
         map_container_box.html(generate_html_floorplan())
         status_msg_box.info(f"⏸️ **Simulation Paused:** `{st.session_state.tugger_status}`")
 
+# --- 7. SANITIZED BOTTLENECK SHORTAGE ANALYTICS PAGE ---
 elif app_mode == "📊 Isolated Shortage Analytics":
     st.title("📊 Sub-Station Isolated Bottleneck Analysis Dashboard")
     
-    active_cols = list(st.session_state.chart_data.columns)
+    # Filter for active simulation station tracking columns
+    active_cols = [c for c in st.session_state.chart_data.columns if "_" in str(c)]
+    
     if not active_cols:
         st.warning("No drop sub-station locations logged.")
     else:
         for col_name in active_cols:
-            ws_part, sub_part = col_name.split("_")
+            # Safe parsing guard to prevent crashing if a column formatting anomaly occurs
+            try:
+                ws_part, sub_part = str(col_name).split("_")
+            except ValueError:
+                continue 
+                
             with st.container(border=True):
                 c_left, c_right = st.columns([1, 4])
                 with c_left:
                     st.subheader(f"📍 {ws_part}")
+                    st.caption(f"Sub-Station: **{sub_part}**")
+                    
                     shortage_duration_secs = st.session_state.starvation_events.get(col_name, 0)
                     st.metric("🚨 Total Starvation Time", format_to_mmss(shortage_duration_secs))
+                    
                     ws_d = st.session_state.workstations.get(ws_part, {})
                     if ws_d:
                         st.caption(f"**Loop Range Location:** {int(ws_d['sub_stations'][sub_part]['distance_meters'])} meters")
