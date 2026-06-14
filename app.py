@@ -11,7 +11,7 @@ def format_to_mmss(total_seconds):
     seconds = int(total_seconds) % 60
     return f"{minutes:02d}:{seconds:02d}"
 
-# --- 2. INITIALIZE GLOBAL STATE WITH OVAL LOOP GEOMETRY ---
+# --- 2. INITIALIZE GLOBAL STATE WITH CUSTOM SEQUENCE & CAPACITIES ---
 if "sim_time" not in st.session_state:
     st.session_state.sim_time = 0          
     st.session_state.trip_log = []         
@@ -26,16 +26,16 @@ if "sim_time" not in st.session_state:
     st.session_state.active_delivery_qty = 0
     st.session_state.current_target_point = None
 
-    # Progressive distance metrics over a 1000m continuous loop circuit
-    # Top track: 0m -> 500m (Left to Right) | Bottom track: 500m -> 1000m (Right to Left)
+    # UPDATED: Production consumption sequence now rolls RA110 -> RA120 -> RA130 -> RA140 -> RA170 -> RA160 -> RA150
+    # UPDATED: Unique box sizes (qty_per_pkg) and delivery batches (pkgs_per_trip) per station
     st.session_state.workstations = {
-        "RA140": {"lane": "top",    "sequence_order": 1, "sub_stations": {"Point A": {"inventory": 22, "rop": 10, "qty_per_pkg": 8,  "pkgs_per_trip": 4, "distance_meters": 150}}},
-        "RA130": {"lane": "top",    "sequence_order": 2, "sub_stations": {"Point A": {"inventory": 25, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_meters": 250}}},
-        "RA120": {"lane": "top",    "sequence_order": 3, "sub_stations": {"Point A": {"inventory": 23, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_meters": 350}}},
-        "RA110": {"lane": "top",    "sequence_order": 4, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_meters": 450}}},
-        "RA170": {"lane": "bottom", "sequence_order": 5, "sub_stations": {"Point A": {"inventory": 25, "rop": 15, "qty_per_pkg": 10, "pkgs_per_trip": 4, "distance_meters": 600}}},
-        "RA160": {"lane": "bottom", "sequence_order": 6, "sub_stations": {"Point A": {"inventory": 26, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_meters": 720}}},
-        "RA150": {"lane": "bottom", "sequence_order": 7, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_meters": 840}}}
+        "RA140": {"lane": "top",    "sequence_order": 4, "sub_stations": {"Point A": {"inventory": 22, "rop": 8,  "qty_per_pkg": 3,  "pkgs_per_trip": 5, "distance_meters": 150}}},
+        "RA130": {"lane": "top",    "sequence_order": 3, "sub_stations": {"Point A": {"inventory": 25, "rop": 10, "qty_per_pkg": 6,  "pkgs_per_trip": 4, "distance_meters": 250}}},
+        "RA120": {"lane": "top",    "sequence_order": 2, "sub_stations": {"Point A": {"inventory": 23, "rop": 12, "qty_per_pkg": 12, "pkgs_per_trip": 3, "distance_meters": 350}}},
+        "RA110": {"lane": "top",    "sequence_order": 1, "sub_stations": {"Point A": {"inventory": 24, "rop": 12, "qty_per_pkg": 10, "pkgs_per_trip": 3, "distance_meters": 450}}},
+        "RA170": {"lane": "bottom", "sequence_order": 5, "sub_stations": {"Point A": {"inventory": 25, "rop": 15, "qty_per_pkg": 8,  "pkgs_per_trip": 4, "distance_meters": 600}}},
+        "RA160": {"lane": "bottom", "sequence_order": 6, "sub_stations": {"Point A": {"inventory": 26, "rop": 12, "qty_per_pkg": 15, "pkgs_per_trip": 2, "distance_meters": 720}}},
+        "RA150": {"lane": "bottom", "sequence_order": 7, "sub_stations": {"Point A": {"inventory": 24, "rop": 10, "qty_per_pkg": 4,  "pkgs_per_trip": 6, "distance_meters": 840}}}
     }
     
     for ws_name, ws_data in st.session_state.workstations.items():
@@ -67,9 +67,12 @@ if selected_flat and selected_flat != "None":
     pt_ref = st.session_state.workstations[ws_target]["sub_stations"][sub_target]
     
     st.markdown(f"⚙️ **Editing:** `{ws_target}`")
+    st.session_state.workstations[ws_target]["sequence_order"] = st.sidebar.number_input("Production Start Seq Order:", min_value=1, max_value=7, value=int(st.session_state.workstations[ws_target]["sequence_order"]))
     pt_ref["distance_meters"] = st.sidebar.number_input("Meter Distance from Start Hub:", min_value=10, max_value=990, value=int(pt_ref["distance_meters"]))
     pt_ref["inventory"] = st.sidebar.number_input("Live Stock Level (Units)", min_value=0, value=int(pt_ref["inventory"]))
     pt_ref["rop"] = st.sidebar.number_input("Reorder Threshold (ROP)", min_value=0, value=int(pt_ref["rop"]))
+    pt_ref["qty_per_pkg"] = st.sidebar.number_input("Qty Per Package:", min_value=1, value=int(pt_ref["qty_per_pkg"]))
+    pt_ref["pkgs_per_trip"] = st.sidebar.number_input("Packages Per Trip:", min_value=1, value=int(pt_ref["pkgs_per_trip"]))
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚡ Simulation Engine Speed")
@@ -82,7 +85,7 @@ def advance_simulation(seconds):
     for _ in range(int(seconds)):
         st.session_state.sim_time += 1
         
-        # A. Production Stock Depletion
+        # A. Production Stock Depletion (Based on customized sequence order)
         for ws_name, ws_data in st.session_state.workstations.items():
             stagger_offset = (ws_data["sequence_order"] - 1) * master_takt_secs
             target_trigger_time = st.session_state.sim_time - stagger_offset
@@ -113,6 +116,8 @@ def advance_simulation(seconds):
             if chosen_sub:
                 st.session_state.current_target_point = (chosen_ws, chosen_sub)
                 p_data = st.session_state.workstations[chosen_ws]["sub_stations"][chosen_sub]
+                
+                # DYNAMIC LOGISTICS CAPACITY CALCULATION:
                 st.session_state.active_delivery_qty = p_data["qty_per_pkg"] * p_data["pkgs_per_trip"]
                 
                 st.session_state.tugger_status = f"Staging Cargo for {chosen_ws}"
@@ -235,7 +240,7 @@ if app_mode == "🗺️ Live Simulation Map":
                 is_targeted = "background: #fa5252; color: white; border: 2px solid #fff; box-shadow: 0 0 12px #fa5252; transform: translate(-50%, -50%) scale(1.05);" if is_active_target else "background: #343a40; color: #f8f9fa; border: 1px solid #495057; transform: translate(-50%, -50%);"
                 unique_key = f"{ws_name}_{sub_name}"
                 
-                # Top lane goes Left -> Right. Bottom lane goes Right -> Left.
+                # Physical map positioning configuration matching loop flow rules
                 if ws_data["lane"] == "top":
                     x_pos = 20.0 + ((m_range - 100.0) / 400.0) * 65.0
                     y_pos = 20.0
@@ -247,6 +252,7 @@ if app_mode == "🗺️ Live Simulation Map":
                 <div class="station-node-pin" style="left: {x_pos}%; top: {y_pos}%; {is_targeted}">
                     <div style="font-weight: bold; font-size: 11px;">{ws_name}</div>
                     <div style="font-size: 9px; opacity: 0.8;">{int(m_range)}m</div>
+                    <div style="font-size: 8px; color: #5c7cfa;">Seq #{ws_data['sequence_order']}</div>
                 </div>
                 """
                 
@@ -256,7 +262,8 @@ if app_mode == "🗺️ Live Simulation Map":
                     <div class="card-title">🏭 {ws_name} <span style="font-size:10px; color:#6c757d;">({int(m_range)}m)</span></div>
                     <div class="card-stock">📦 {d['inventory']} <span style="font-size:11px; color:#495057;">u</span></div>
                     <div class="card-meta">
-                        ROP: <b>{d['rop']} u</b> <br>
+                        Pack size: <b>{d['qty_per_pkg']}u x {d['pkgs_per_trip']}</b><br>
+                        ROP: <b>{d['rop']} u</b> | Seq: <b>#{ws_data['sequence_order']}</b><br>
                         Shortage: <span style="color:#fa5252; font-weight:bold;">{format_to_mmss(st.session_state.starvation_events[unique_key])}</span>
                     </div>
                 </div>
@@ -279,11 +286,11 @@ if app_mode == "🗺️ Live Simulation Map":
         return f"""
         <style>
             .floorplan-wrapper {{ background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 12px; padding: 20px; font-family: system-ui, sans-serif; }}
-            .cards-outer-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 20px; }}
+            .cards-outer-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 10px; margin-top: 20px; }}
             .kpi-card-block {{ background: #ffffff; border: 1px solid #dee2e6; border-radius: 6px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.01); }}
             .card-title {{ font-weight: bold; font-size: 13px; color: #212529; }}
             .card-stock {{ font-size: 18px; font-weight: 800; color: #1c7ed6; margin: 2px 0; }}
-            .card-meta {{ font-size: 11px; color: #6c757d; border-top: 1px solid #f1f3f5; padding-top: 4px; margin-top: 4px; line-height: 1.3; }}
+            .card-meta {{ font-size: 10.5px; color: #6c757d; border-top: 1px solid #f1f3f5; padding-top: 4px; margin-top: 4px; line-height: 1.4; }}
             
             .loop-track-container {{ height: 140px; border: 4px solid #e03131; border-radius: 70px; position: relative; margin: 20px 10px; background: #ffffff; }}
             
@@ -325,14 +332,12 @@ if app_mode == "🗺️ Live Simulation Map":
 elif app_mode == "📊 Isolated Shortage Analytics":
     st.title("📊 Sub-Station Isolated Bottleneck Analysis Dashboard")
     
-    # Filter for active simulation station tracking columns
     active_cols = [c for c in st.session_state.chart_data.columns if "_" in str(c)]
     
     if not active_cols:
         st.warning("No drop sub-station locations logged.")
     else:
         for col_name in active_cols:
-            # Safe parsing guard to prevent crashing if a column formatting anomaly occurs
             try:
                 ws_part, sub_part = str(col_name).split("_")
             except ValueError:
@@ -350,6 +355,7 @@ elif app_mode == "📊 Isolated Shortage Analytics":
                     ws_d = st.session_state.workstations.get(ws_part, {})
                     if ws_d:
                         st.caption(f"**Loop Range Location:** {int(ws_d['sub_stations'][sub_part]['distance_meters'])} meters")
+                        st.caption(f"**Prod Sequence:** Row Line #{ws_d['sequence_order']}")
                 with c_right:
                     st.line_chart(st.session_state.chart_data[col_name].iloc[-400:], height=150)
         
